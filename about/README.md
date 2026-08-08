@@ -4,7 +4,7 @@ Diseñadora industrial, UDP
 
 **Hoy_** Docente y coordinación académica, diseño gráfico, Facultad de Diseño. 
 
-**Qué me gustaría aprender en este curso_**  plataformas reactivas a estímulos externos. Cámara > Audio > Sonidos, etc
+**Qué me gustaría aprender en este curso_**  plataformas reactivas a estímulos externos. Cámara > Audio > Sonidos, etc.
 
 ## intereses
 
