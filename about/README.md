@@ -1,28 +1,25 @@
-# Nombre Apellido
+# Javiera Alvear S
 
-## Perfil
+Diseñadora industrial, UDP
 
-**Disciplina / formación:**  
-**Qué hago hoy:**  
-**Qué me gustaría aprender en este curso:**  
+**Hoy_** Docente y coordinación académica, diseño gráfico, Facultad de Diseño. 
 
-## Intereses
+**Qué me gustaría aprender en este curso_**  plataformas reactivas a estímulos externos. Cámara > Audio > Sonidos, etc
 
-- Tema o disciplina 1
-- Tema o disciplina 2
-- Tema o disciplina 3
+## intereses
 
-## Una pregunta que me interesa explorar
+- Dirección creativa.
+- Moda y contracultura. Música y cine.
+- Inmersividad y experiencias sensoriales
+
+## pregunta exploratoria
 
 Escribe una pregunta pequeña que pueda transformarse en reglas, datos, geometría, imágenes o interacción.
 
-## Algo que me inspira
+## algo que me inspira
 
-Agrega una imagen local en `assets/images/` y cítala con Markdown, o agrega un link a un proyecto/referencia.
+![Descripción de la imagen](../assets/images/mcqueen98.jpg)
 
-```md
-![Descripción de la imagen](../assets/images/mi-imagen.jpg)
-```
 
 ## Links
 
