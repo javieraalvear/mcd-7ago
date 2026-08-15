@@ -145,16 +145,37 @@
     }
 
     @media (max-width: 900px) {
-      .ja-archive { min-height: auto; }
-      .ja-archive__portrait { position: relative; height: 60vh; }
-      .ja-archive__thread { display: none; }
-      .ja-card, .ja-archive__label {
-        position: static;
-        transform: none !important;
-        width: auto;
-        margin: 1rem 5%;
-        clip-path: none !important;
+      .ja-archive { min-height: 0; height: 178vw; }
+      .ja-archive__portrait {
+        inset: auto;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: auto;
+        aspect-ratio: 941 / 1672;
+        background-image:
+          linear-gradient(180deg, rgba(10,10,9,0.15) 0%, rgba(10,10,9,0.65) 100%),
+          url("about/assets/images/aranalong.png");
+        background-position: center top;
       }
+      .ja-archive__thread { display: none; }
+
+      .ja-archive__label { top: 2vw; left: 4vw; padding: 0.7rem 1rem; }
+      .ja-archive__label h1 { font-size: 1.5rem; }
+
+      .ja-card { width: 60vw; padding: 0.65rem 0.9rem; }
+      .ja-card__eyebrow { font-size: 0.6rem; margin-bottom: 0.25rem; }
+      .ja-card p, .ja-card li { font-size: 0.72rem; line-height: 1.3; }
+
+      /* columna izquierda: 4vw-64vw */
+      .ja-card--ticket   { top: 30vw; left: 4vw; width: 60vw; right: auto; }
+      .ja-card--torn     { top: 55vw; left: 4vw; width: 60vw; }
+      .ja-card--polaroid { top: 95vw; left: 4vw; width: 60vw; }
+
+      /* columna derecha: 68vw-98vw, sin cruce horizontal con la izquierda */
+      .ja-card--sticky   { top: 2vw;  left: 68vw; width: 30vw; }
+      .ja-card--specimen { top: 47vw; left: 68vw; width: 30vw; }
+      .ja-card--tag      { top: 100vw; left: 68vw; width: 30vw; }
     }
   </style>
 </head>
