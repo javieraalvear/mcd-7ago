@@ -13,7 +13,7 @@
   inset: 0;
   background-image:
     linear-gradient(180deg, rgba(10,10,9,0.15) 0%, rgba(10,10,9,0.65) 100%),
-    url("../assets/images/javiaraña.png");
+    url("assets/images/javiaraña.png");
   background-size: cover;
   background-position: center 20%;
   filter: grayscale(0.6) contrast(1.05);
@@ -195,7 +195,7 @@
   <div class="ja-card ja-card--specimen">
     <p class="ja-card__eyebrow">Objeto_</p>
     <model-viewer
-      src="../assets/models/spider.glb"
+      src="assets/models/spider.glb"
       alt="Modelo 3D de referencia"
       camera-controls
       auto-rotate
