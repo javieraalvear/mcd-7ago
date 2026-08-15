@@ -146,7 +146,7 @@
 <section class="ja-archive">
   <div class="ja-archive__portrait"></div>
 
-  <svg class="ja-archive__thread" viewbox="0 0 100 100" preserveAspectRatio="none">
+  <svg class="ja-archive__thread" viewBox="0 0 100 100" preserveAspectRatio="none">
     <line x1="50" y1="35" x2="15" y2="30" vector-effect="non-scaling-stroke"></line>
     <line x1="50" y1="35" x2="72" y2="14" vector-effect="non-scaling-stroke"></line>
     <line x1="50" y1="35" x2="66" y2="44" vector-effect="non-scaling-stroke"></line>
