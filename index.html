@@ -42,9 +42,10 @@
       z-index: 2;
       pointer-events: none;
     }
-    .ja-archive__thread line {
+    .ja-archive__thread path {
       stroke: #b3261e;
       stroke-width: 1.5;
+      fill: none;
       opacity: 0.75;
     }
 
@@ -98,6 +99,14 @@
       padding: 1.1rem 1.3rem;
       width: 230px;
       box-shadow: 4px 6px 14px rgba(0,0,0,0.45);
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+    }
+    .ja-card.is-dragging {
+      z-index: 10;
+      cursor: grabbing;
+      box-shadow: 6px 10px 22px rgba(0,0,0,0.55);
     }
     .ja-card__eyebrow {
       font-family: "IBM Plex Mono", monospace;
@@ -119,24 +128,13 @@
     .ja-card--ticket    { top: 26%; left: 4%;  transform: rotate(-3deg); clip-path: polygon(0 8%,100% 0,100% 92%,0 100%); }
     .ja-card--sticky    { top: 8%;  left: 68%; transform: rotate(3deg); }
     .ja-card--torn      { top: 40%; left: 62%; transform: rotate(-2deg); }
-    .ja-card--polaroid  { top: 58%; left: 6%;  transform: rotate(4deg); padding-bottom: 2.2rem; }
+    .ja-card--polaroid  { top: 58%; left: 6%;  transform: rotate(4deg); }
     .ja-card--tag       { top: 66%; left: 66%; transform: rotate(-5deg); }
     .ja-card--specimen  { top: 4%;  left: 34%; transform: rotate(1deg); width: 260px; }
 
     .ja-card--polaroid .ja-card__quote {
       font-style: italic;
       font-family: "Newsreader", serif;
-    }
-    .ja-card--polaroid::after {
-      content: "fig. 04 / pregunta";
-      position: absolute;
-      bottom: 0.6rem;
-      left: 1.3rem;
-      font-family: "IBM Plex Mono", monospace;
-      font-size: 0.6rem;
-      color: rgba(206,248,162,0.6);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
     }
 
     .ja-card--specimen model-viewer {
@@ -159,8 +157,6 @@
           url("about/assets/images/aranalong.png");
         background-position: center top;
       }
-      .ja-archive__thread { display: none; }
-
       .ja-archive__label { top: 2vw; left: 4vw; padding: 0.7rem 1rem; }
       .ja-archive__label h1 { font-size: 1.5rem; }
 
@@ -185,14 +181,7 @@
   <section class="ja-archive">
     <div class="ja-archive__portrait"></div>
 
-    <svg class="ja-archive__thread" viewBox="0 0 100 100" preserveAspectRatio="none">
-      <line x1="50" y1="35" x2="15" y2="30" vector-effect="non-scaling-stroke"></line>
-      <line x1="50" y1="35" x2="72" y2="14" vector-effect="non-scaling-stroke"></line>
-      <line x1="50" y1="35" x2="66" y2="44" vector-effect="non-scaling-stroke"></line>
-      <line x1="50" y1="35" x2="15" y2="62" vector-effect="non-scaling-stroke"></line>
-      <line x1="50" y1="35" x2="70" y2="70" vector-effect="non-scaling-stroke"></line>
-      <line x1="50" y1="35" x2="45" y2="10" vector-effect="non-scaling-stroke"></line>
-    </svg>
+    <svg class="ja-archive__thread" aria-hidden="true"></svg>
 
     <div class="ja-archive__label">
       <span class="ja-archive__pin"></span>
@@ -240,6 +229,112 @@
       </model-viewer>
     </div>
   </section>
+
+  <script>
+    (function () {
+      var archive = document.querySelector('.ja-archive');
+      var svg = document.querySelector('.ja-archive__thread');
+      var cards = Array.prototype.slice.call(document.querySelectorAll('.ja-card'));
+      var origin = { xPct: 0.5, yPct: 0.32 };
+      var THRESHOLD = 4;
+
+      var threads = cards.map(function (card) {
+        var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        svg.appendChild(path);
+        return { card: card, path: path };
+      });
+
+      function updateThreads() {
+        var rect = archive.getBoundingClientRect();
+        svg.setAttribute('viewBox', '0 0 ' + rect.width + ' ' + rect.height);
+        var ox = rect.width * origin.xPct;
+        var oy = rect.height * origin.yPct;
+        threads.forEach(function (t) {
+          var r = t.card.getBoundingClientRect();
+          var cx = r.left - rect.left + r.width / 2;
+          var cy = r.top - rect.top;
+          var dx = cx - ox, dy = cy - oy;
+          var dist = Math.sqrt(dx * dx + dy * dy);
+          var sag = Math.min(Math.max(dist * 0.18, 16), 90);
+          var mx = (ox + cx) / 2;
+          var my = (oy + cy) / 2 + sag;
+          t.path.setAttribute('d', 'M ' + ox + ' ' + oy + ' Q ' + mx + ' ' + my + ' ' + cx + ' ' + cy);
+        });
+      }
+
+      var pending = null;
+      var dragEl = null;
+      var offsetX = 0, offsetY = 0;
+
+      function beginDrag(el, x, y) {
+        var rect = archive.getBoundingClientRect();
+        var r = el.getBoundingClientRect();
+        el.style.left = (r.left - rect.left) + 'px';
+        el.style.top = (r.top - rect.top) + 'px';
+        el.style.right = 'auto';
+        offsetX = x - r.left;
+        offsetY = y - r.top;
+        dragEl = el;
+        el.classList.add('is-dragging');
+      }
+
+      function dragTo(x, y) {
+        var rect = archive.getBoundingClientRect();
+        var w = dragEl.offsetWidth, h = dragEl.offsetHeight;
+        var nx = x - rect.left - offsetX;
+        var ny = y - rect.top - offsetY;
+        nx = Math.max(0, Math.min(nx, rect.width - w));
+        ny = Math.max(0, Math.min(ny, rect.height - h));
+        dragEl.style.left = nx + 'px';
+        dragEl.style.top = ny + 'px';
+        updateThreads();
+      }
+
+      function onPointerDown(el, x, y) {
+        pending = { el: el, x: x, y: y };
+      }
+
+      function onPointerMove(x, y) {
+        if (dragEl) { dragTo(x, y); return; }
+        if (!pending) return;
+        if (Math.abs(x - pending.x) > THRESHOLD || Math.abs(y - pending.y) > THRESHOLD) {
+          beginDrag(pending.el, x, y);
+          dragTo(x, y);
+        }
+      }
+
+      function onPointerUp() {
+        if (dragEl) dragEl.classList.remove('is-dragging');
+        dragEl = null;
+        pending = null;
+      }
+
+      cards.forEach(function (card) {
+        card.addEventListener('mousedown', function (e) {
+          onPointerDown(card, e.clientX, e.clientY);
+        });
+        card.addEventListener('touchstart', function (e) {
+          var t = e.touches[0];
+          onPointerDown(card, t.clientX, t.clientY);
+        }, { passive: true });
+      });
+
+      window.addEventListener('mousemove', function (e) { onPointerMove(e.clientX, e.clientY); });
+      window.addEventListener('touchmove', function (e) {
+        if (!dragEl && !pending) return;
+        var t = e.touches[0];
+        onPointerMove(t.clientX, t.clientY);
+        if (dragEl) e.preventDefault();
+      }, { passive: false });
+      window.addEventListener('mouseup', onPointerUp);
+      window.addEventListener('touchend', onPointerUp);
+      window.addEventListener('resize', updateThreads);
+
+      if (document.readyState === 'complete') updateThreads();
+      else window.addEventListener('load', updateThreads);
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(updateThreads);
+    })();
+  </script>
 
 </body>
 </html>
