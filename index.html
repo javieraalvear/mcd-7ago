@@ -16,7 +16,7 @@
 
     .ja-archive {
       position: relative;
-      min-height: 100vh;
+      min-height: max(100vh, 1550px);
       background: #0d0d0c;
       color: #1a1a1a;
       font-family: "Newsreader", serif;
@@ -124,12 +124,52 @@
     .ja-card ul { padding-left: 1.1rem; margin: 0; }
     .ja-card a { color: #cef8a2; }
 
+    /* ===== Listado de referencias dentro de "Inspira / links_" ===== */
+    .ja-ref {
+      padding-top: 0.4rem;
+      margin-top: 0.4rem;
+      border-top: 1px solid rgba(206,248,162,0.25);
+    }
+    .ja-ref:first-of-type {
+      padding-top: 0;
+      margin-top: 0;
+      border-top: none;
+    }
+    .ja-ref__name {
+      font-weight: 600;
+      font-size: 0.86rem;
+      margin: 0 0 0.15rem;
+    }
+    .ja-ref__cat {
+      display: block;
+      font-family: "IBM Plex Mono", monospace;
+      font-weight: 400;
+      font-size: 0.62em;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      opacity: 0.6;
+      margin-bottom: 0.15em;
+    }
+    .ja-ref__name a {
+      margin-left: 0.4rem;
+      font-size: 0.7rem;
+      font-family: "IBM Plex Mono", monospace;
+      text-decoration: underline;
+    }
+    .ja-ref__why {
+      font-size: 0.78rem;
+      font-style: italic;
+      opacity: 0.85;
+      line-height: 1.35;
+      margin: 0;
+    }
+
     /* piezas individuales: posición + rotación + tipo de recorte */
     .ja-card--ticket    { top: 26%; left: 4%;  transform: rotate(-3deg); clip-path: polygon(0 8%,100% 0,100% 92%,0 100%); }
     .ja-card--sticky    { top: 8%;  left: 68%; transform: rotate(3deg); }
     .ja-card--torn      { top: 40%; left: 62%; transform: rotate(-2deg); }
     .ja-card--polaroid  { top: 58%; left: 6%;  transform: rotate(4deg); }
-    .ja-card--tag       { top: 66%; left: 66%; transform: rotate(-5deg); }
+    .ja-card--tag       { top: 66%; left: 66%; transform: rotate(-5deg); width: 340px; }
     .ja-card--specimen  { top: 4%;  left: 34%; transform: rotate(1deg); width: 260px; }
 
     .ja-card--polaroid .ja-card__quote {
@@ -144,7 +184,7 @@
     }
 
     @media (max-width: 900px) {
-      .ja-archive { min-height: 0; height: 178vw; }
+      .ja-archive { min-height: 0; height: 236vw; }
       .ja-archive__portrait {
         inset: auto;
         top: 0;
@@ -168,11 +208,17 @@
       .ja-card--ticket   { top: 30vw; left: 4vw; width: 60vw; right: auto; }
       .ja-card--torn     { top: 55vw; left: 4vw; width: 60vw; }
       .ja-card--polaroid { top: 95vw; left: 4vw; width: 60vw; }
+      .ja-card--tag      { top: 145vw; left: 4vw; width: 92vw; }
 
       /* columna derecha: 68vw-98vw, sin cruce horizontal con la izquierda */
       .ja-card--sticky   { top: 2vw;  left: 68vw; width: 30vw; }
       .ja-card--specimen { top: 47vw; left: 68vw; width: 30vw; }
-      .ja-card--tag      { top: 100vw; left: 68vw; width: 30vw; }
+
+      .ja-ref { padding-top: 0.3rem; margin-top: 0.3rem; }
+      .ja-ref__cat { font-size: 0.52rem; }
+      .ja-ref__name { font-size: 0.76rem; }
+      .ja-ref__name a { font-size: 0.64rem; }
+      .ja-ref__why { font-size: 0.68rem; line-height: 1.25; }
     }
   </style>
 </head>
@@ -215,7 +261,31 @@
 
     <div class="ja-card ja-card--tag">
       <p class="ja-card__eyebrow">Inspira / links_</p>
-      <p><a href="https://www.youtube.com/watch?v=CVN4WUKIzjA" target="_blank" rel="noopener">McQueen — Plato's Atlantis</a></p>
+
+      <div class="ja-ref">
+        <p class="ja-ref__name"><span class="ja-ref__cat">Herramienta técnica</span>ml5.js — FaceMesh <a href="https://learn.ml5js.org/#/reference/facemesh" target="_blank" rel="noopener">ver</a></p>
+        <p class="ja-ref__why">Captura geometría facial en tiempo real, base técnica posible para tu campo.</p>
+      </div>
+
+      <div class="ja-ref">
+        <p class="ja-ref__name"><span class="ja-ref__cat">Instalación / biometría</span>Lozano-Hemmer — Pulse Room <a href="https://www.lozano-hemmer.com/pulse_room.php" target="_blank" rel="noopener">ver</a></p>
+        <p class="ja-ref__why">Traduce señal biológica directa a objeto lumínico colectivo.</p>
+      </div>
+
+      <div class="ja-ref">
+        <p class="ja-ref__name"><span class="ja-ref__cat">Moda / cuerpo tecnológico</span>McQueen — Plato's Atlantis <a href="https://www.youtube.com/watch?v=CVN4WUKIzjA" target="_blank" rel="noopener">ver</a></p>
+        <p class="ja-ref__why">Piel reactiva, cuerpo y tecnología sin mediación explicativa.</p>
+      </div>
+
+      <div class="ja-ref">
+        <p class="ja-ref__name"><span class="ja-ref__cat">Moda / couture computacional</span>Iris van Herpen</p>
+        <p class="ja-ref__why">Geometría generativa aplicada a textil y cuerpo.</p>
+      </div>
+
+      <div class="ja-ref">
+        <p class="ja-ref__name"><span class="ja-ref__cat">Diseño / biomaterial</span>Neri Oxman — Material Ecology</p>
+        <p class="ja-ref__why">Forma generativa ligada a proceso material, no aislada.</p>
+      </div>
     </div>
 
     <div class="ja-card ja-card--specimen">
