@@ -29,6 +29,16 @@
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
+    width: 250px;
+    max-height: calc(100vh - 2.4rem);
+    overflow-y: auto;
+    padding: 1rem;
+    background: rgba(20, 20, 18, 0.55);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(237, 233, 223, 0.12);
+    border-radius: 18px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
   }
 
   h1 {
@@ -41,6 +51,8 @@
   .status {
     font-size: 0.7rem;
     color: #8a8478;
+    min-height: 1.8em;
+    line-height: 1.3;
   }
   .status strong { color: #c81e1e; }
 
@@ -82,7 +94,7 @@
     flex-wrap: wrap;
     gap: 0.35rem;
   }
-  .brushBtn {
+  .brushBtn, .sceneBtn {
     font-family: "IBM Plex Mono", monospace;
     font-size: 0.65rem;
     letter-spacing: 0.03em;
@@ -93,7 +105,7 @@
     padding: 0.35rem 0.6rem;
     cursor: pointer;
   }
-  .brushBtn.active { border-color: #c81e1e; color: #c81e1e; }
+  .brushBtn.active, .sceneBtn.active { border-color: #c81e1e; color: #c81e1e; }
 
   .palette {
     display: flex;
@@ -144,6 +156,11 @@
   <p class="status" id="statusText">Buscando mano<strong>...</strong></p>
 
   <div class="section">
+    <label class="label">Escenario</label>
+    <div class="brushes" id="scenes"></div>
+  </div>
+
+  <div class="section">
     <label class="label">Pincel</label>
     <div class="brushes" id="brushes"></div>
   </div>
@@ -162,8 +179,11 @@
     </div>
   </div>
 
-  <button id="clearBtn">Limpiar muro</button>
-  <button id="saveBtn">Guardar PNG</button>
+  <div class="section">
+    <button id="pauseBtn">Pausar</button>
+    <button id="clearBtn">Limpiar muro</button>
+    <button id="saveBtn">Guardar PNG</button>
+  </div>
 </div>
 
 <script>
@@ -191,6 +211,17 @@ let nozzleScale = 1; // multiplicador manual sobre el radio calculado por gesto
 
 // último punto pintado, para que "marcador" pueda trazar líneas continuas
 let prevX = 0, prevY = 0, isSprayingPrev = false;
+
+let isPaused = false; // congela el resultado sin perder lo pintado
+
+const scenes = {
+  pared: { label: "Pared" },
+  pizarra: { label: "Pizarra" },
+  ladrillo: { label: "Ladrillo" },
+  camara: { label: "Mi cámara" }
+};
+let currentScene = "pared";
+let sceneBuffers = {}; // fondos estáticos precalculados (todo menos "camara")
 
 const brushes = {
   spray: {
@@ -259,7 +290,9 @@ function setup() {
   canvas.style("display", "block");
 
   wall = createGraphics(windowWidth, windowHeight);
-  wall.background(20, 20, 18); // color del muro
+  wall.clear(); // el muro empieza transparente: se ve el escenario detrás
+
+  buildSceneBuffers();
 
   video = createCapture(VIDEO);
   video.size(320, 240);
@@ -269,9 +302,11 @@ function setup() {
 
   buildPalette();
   buildBrushes();
+  buildSceneButtons();
   buildColorWheel();
-  select("#clearBtn").mousePressed(() => wall.background(20, 20, 18));
-  select("#saveBtn").mousePressed(() => saveCanvas(wall, "graffiti-gestual", "png"));
+  select("#clearBtn").mousePressed(() => wall.clear());
+  select("#saveBtn").mousePressed(saveArtwork);
+  select("#pauseBtn").mousePressed(togglePause);
   select("#nozzleSlider").input(() => {
     nozzleScale = float(select("#nozzleSlider").value());
     select("#nozzleVal").html(nozzleScale.toFixed(1) + "x");
@@ -279,27 +314,37 @@ function setup() {
 }
 
 function draw() {
-  image(wall, 0, 0); // dibuja el muro acumulado
+  drawSceneBackground();
+  image(wall, 0, 0); // dibuja la pintura acumulada sobre el escenario
 
   drawCameraPreview();
 
   if (hands.length > 0) {
     const params = getSprayParams(hands[0]);
-    updateStatus(params);
 
-    if (params.spraying) {
-      // si recién empezó el gesto, no traza línea desde el punto anterior
-      const prev = isSprayingPrev ? { x: prevX, y: prevY } : { x: params.x, y: params.y };
-      brushes[currentBrush].draw(params.x, params.y, params.radius, currentColor, prev);
-      prevX = params.x;
-      prevY = params.y;
+    if (isPaused) {
+      select("#statusText").html('Mano detectada — <strong>PAUSADO</strong>');
+    } else {
+      updateStatus(params);
+      if (params.spraying) {
+        // si recién empezó el gesto, no traza línea desde el punto anterior
+        const prev = isSprayingPrev ? { x: prevX, y: prevY } : { x: params.x, y: params.y };
+        brushes[currentBrush].draw(params.x, params.y, params.radius, currentColor, prev);
+        prevX = params.x;
+        prevY = params.y;
+      }
+      isSprayingPrev = params.spraying;
     }
-    isSprayingPrev = params.spraying;
-    drawNozzleCursor(params);
+    drawNozzleCursor({ ...params, spraying: params.spraying && !isPaused });
   } else {
     isSprayingPrev = false;
-    select("#statusText").html('Buscando mano<strong>...</strong>');
+    select("#statusText").html(isPaused ? 'Pausado' : 'Buscando mano<strong>...</strong>');
   }
+}
+
+function togglePause() {
+  isPaused = !isPaused;
+  select("#pauseBtn").html(isPaused ? "Reanudar" : "Pausar");
 }
 
 /* --------------------------------------------------------
@@ -346,6 +391,82 @@ function drawCameraPreview() {
   scale(-1, 1); // efecto espejo, sin esto se siente invertido al pintar
   image(video, -w, 0, w, h);
   pop();
+}
+
+function drawSceneBackground() {
+  if (currentScene === "camara") {
+    push();
+    translate(width, 0);
+    scale(-1, 1); // mismo espejo que el resto del sistema
+    image(video, 0, 0, width, height);
+    pop();
+  } else {
+    image(sceneBuffers[currentScene], 0, 0);
+  }
+}
+
+function buildSceneBuffers() {
+  sceneBuffers.pared = createGraphics(width, height);
+  sceneBuffers.pared.background(20, 20, 18);
+
+  sceneBuffers.pizarra = createGraphics(width, height);
+  sceneBuffers.pizarra.background(26, 46, 36);
+  sceneBuffers.pizarra.noFill();
+  sceneBuffers.pizarra.stroke(70, 45, 25);
+  sceneBuffers.pizarra.strokeWeight(18);
+  sceneBuffers.pizarra.rect(9, 9, width - 18, height - 18);
+
+  sceneBuffers.ladrillo = createGraphics(width, height);
+  drawBrickPattern(sceneBuffers.ladrillo);
+}
+
+function drawBrickPattern(g) {
+  const brickW = 64, brickH = 28, mortar = 4;
+  g.background(58, 30, 24);
+  g.noStroke();
+  g.fill(46, 24, 19);
+  for (let y = 0; y < g.height; y += brickH) {
+    const offset = (Math.floor(y / brickH) % 2 === 0) ? 0 : brickW / 2;
+    for (let x = -brickW; x < g.width + brickW; x += brickW) {
+      g.rect(x + offset + mortar / 2, y + mortar / 2, brickW - mortar, brickH - mortar, 2);
+    }
+  }
+}
+
+function buildSceneButtons() {
+  const wrap = select("#scenes");
+  Object.keys(scenes).forEach((key) => {
+    const btn = createButton(scenes[key].label);
+    btn.class("sceneBtn" + (key === currentScene ? " active" : ""));
+    btn.parent(wrap);
+    btn.mousePressed(() => {
+      currentScene = key;
+      selectAll(".sceneBtn").forEach(el => el.removeClass("active"));
+      btn.addClass("active");
+    });
+  });
+}
+
+function saveArtwork() {
+  const composite = createGraphics(width, height);
+  if (currentScene === "camara") {
+    composite.push();
+    composite.translate(width, 0);
+    composite.scale(-1, 1);
+    composite.image(video, 0, 0, width, height);
+    composite.pop();
+  } else {
+    composite.image(sceneBuffers[currentScene], 0, 0);
+  }
+  composite.image(wall, 0, 0);
+  saveCanvas(composite, "graffiti-gestual", "png");
+}
+
+function keyPressed() {
+  if (key === " ") {
+    togglePause();
+    return false; // evita el scroll de página con la barra espaciadora
+  }
 }
 
 function updateStatus(params) {
@@ -455,6 +576,7 @@ function rgbToHex(r, g, b) {
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
+  buildSceneBuffers(); // fondos estáticos, se regeneran gratis
   // el muro NO se redimensiona para no perder lo pintado;
   // si quieres que se adapte al resize, habría que reescalar wall aquí.
 }
