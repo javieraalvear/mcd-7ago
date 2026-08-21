@@ -1,120 +1,242 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Campo Generativo 01</title>
-  <link rel="stylesheet" href="./style.css" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Graffiti Gestual</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.js"></script>
+<script src="https://unpkg.com/ml5@1/dist/ml5.js"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #0d0d0c;
+    color: #ede9df;
+    font-family: "IBM Plex Mono", monospace;
+    overflow: hidden;
+  }
+
+  #ui {
+    position: fixed;
+    top: 1.2rem;
+    left: 1.2rem;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  h1 {
+    font-size: 0.85rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin: 0 0 0.4rem;
+  }
+
+  .status {
+    font-size: 0.7rem;
+    color: #8a8478;
+  }
+  .status strong { color: #c81e1e; }
+
+  button {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    background: #1a1a1a;
+    color: #ede9df;
+    border: 1px solid #3a3a38;
+    padding: 0.5rem 0.9rem;
+    cursor: pointer;
+  }
+  button:hover { border-color: #c81e1e; }
+
+  .palette {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.3rem;
+  }
+  .swatch {
+    width: 22px;
+    height: 22px;
+    border: 2px solid transparent;
+    cursor: pointer;
+  }
+  .swatch.active { border-color: #ede9df; }
+
+  #camPreview {
+    position: fixed;
+    bottom: 1.2rem;
+    right: 1.2rem;
+    z-index: 10;
+    width: 200px;
+    border: 1px solid #3a3a38;
+    opacity: 0.85;
+  }
+</style>
 </head>
 <body>
-  <main class="app-shell">
-    <section class="viewport-shell">
-      <header class="project-header">
-        <div>
-          <p class="eyebrow">COMPUTACIÓN AVANZADA · MCD UAI</p>
-          <h1>Campo Generativo 01</h1>
-          <p class="subtitle">
-            Un sistema tridimensional simple para explorar reglas, parámetros e iteración.
-          </p>
-        </div>
-      </header>
 
-      <div id="viewport"></div>
+<div id="ui">
+  <h1>Graffiti gestual</h1>
+  <p class="status" id="statusText">Buscando mano<strong>...</strong></p>
+  <div class="palette" id="palette"></div>
+  <button id="clearBtn">Limpiar muro</button>
+  <button id="saveBtn">Guardar PNG</button>
+</div>
 
-      <div class="hint">
-        Arrastra para orbitar · Rueda para acercar · Click derecho para desplazar
-      </div>
-    </section>
+<script>
+/* ============================================================
+   PIPELINE: cámara -> ml5 handPose -> landmarks -> parámetros
+   El "muro" (wall) es un graphics buffer que NUNCA se limpia
+   entre frames, por eso la pintura se acumula. Cuando conectes
+   un sensor de movimiento a futuro, solo reemplazas la función
+   getSprayParams() por una que lea ese sensor: el resto del
+   sistema (muro, spray, paleta) no cambia.
+   ============================================================ */
 
-    <aside class="controls-panel">
-      <div class="panel-header">
-        <p class="eyebrow">PARÁMETROS</p>
-        <h2>Espacio de diseño</h2>
-      </div>
+let handPose;
+let video;
+let hands = [];
+let wall; // buffer persistente = el muro
 
-      <section class="control-group">
-        <h3>Sistema</h3>
+// gesto: pinch pulgar-índice bajo este umbral = "presionando la boquilla"
+const PINCH_THRESHOLD = 45;
 
-        <label>
-          <span>Columnas</span>
-          <output id="columnas-valor">15</output>
-          <input id="columnas" type="range" min="5" max="30" step="1" value="15" />
-        </label>
+const palette = ["#c81e1e", "#ede9df", "#2b6cb0", "#e0a92e", "#111111"];
+let currentColor = palette[0];
 
-        <label>
-          <span>Filas</span>
-          <output id="filas-valor">15</output>
-          <input id="filas" type="range" min="5" max="30" step="1" value="15" />
-        </label>
+function preload() {
+  handPose = ml5.handPose({ flipped: true }); // flipped: coincide con el mirror del canvas
+}
 
-        <label>
-          <span>Separación</span>
-          <output id="separacion-valor">1.20</output>
-          <input id="separacion" type="range" min="0.7" max="2.0" step="0.05" value="1.2" />
-        </label>
-      </section>
+function setup() {
+  const canvas = createCanvas(windowWidth, windowHeight);
+  canvas.style("display", "block");
 
-      <section class="control-group">
-        <h3>Comportamiento</h3>
+  wall = createGraphics(windowWidth, windowHeight);
+  wall.background(20, 20, 18); // color del muro
 
-        <label>
-          <span>Amplitud</span>
-          <output id="amplitud-valor">3.00</output>
-          <input id="amplitud" type="range" min="0" max="6" step="0.1" value="3" />
-        </label>
+  video = createCapture(VIDEO);
+  video.size(320, 240);
+  video.hide();
 
-        <label>
-          <span>Frecuencia</span>
-          <output id="frecuencia-valor">0.40</output>
-          <input id="frecuencia" type="range" min="0.05" max="1.2" step="0.05" value="0.4" />
-        </label>
+  handPose.detectStart(video, (results) => { hands = results; });
 
-        <label>
-          <span>Rotación</span>
-          <output id="rotacion-valor">0.30</output>
-          <input id="rotacion" type="range" min="0" max="1.2" step="0.05" value="0.3" />
-        </label>
-      </section>
+  buildPalette();
+  select("#clearBtn").mousePressed(() => wall.background(20, 20, 18));
+  select("#saveBtn").mousePressed(() => saveCanvas(wall, "graffiti-gestual", "png"));
+}
 
-      <section class="control-group">
-        <h3>Variación</h3>
+function draw() {
+  image(wall, 0, 0); // dibuja el muro acumulado
 
-        <label>
-          <span>Aleatoriedad</span>
-          <output id="aleatoriedad-valor">0.00</output>
-          <input id="aleatoriedad" type="range" min="0" max="1.5" step="0.05" value="0" />
-        </label>
+  drawCameraPreview();
 
-        <label>
-          <span>Semilla</span>
-          <output id="semilla-valor">42</output>
-          <input id="semilla" type="range" min="1" max="100" step="1" value="42" />
-        </label>
-      </section>
+  if (hands.length > 0) {
+    const params = getSprayParams(hands[0]);
+    updateStatus(params);
 
-      <div class="actions">
-        <button id="regenerar">Regenerar</button>
-        <button id="restablecer" class="secondary">Restablecer</button>
-      </div>
-
-      <footer class="panel-footer">
-        <p>
-          Pregunta guía:<br />
-          <strong>¿Qué cambia cuando diseñamos las reglas y no una forma única?</strong>
-        </p>
-      </footer>
-    </aside>
-  </main>
-
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
-      }
+    if (params.spraying) {
+      spray(params.x, params.y, params.radius, currentColor);
     }
-  </script>
+    drawNozzleCursor(params);
+  } else {
+    select("#statusText").html('Buscando mano<strong>...</strong>');
+  }
+}
 
-  <script type="module" src="./main.js"></script>
+/* --------------------------------------------------------
+   Traduce los 21 landmarks de la mano a los parámetros que
+   el sistema de spray necesita. Este es el punto exacto que
+   reemplazarías si el input pasa a ser un sensor de movimiento.
+   -------------------------------------------------------- */
+function getSprayParams(hand) {
+  const kp = (name) => hand.keypoints.find(p => p.name === name);
+
+  const indexTip = kp("index_finger_tip");
+  const thumbTip = kp("thumb_tip");
+  const wrist = kp("wrist");
+  const middleTip = kp("middle_finger_tip");
+
+  const pinchDist = dist(indexTip.x, indexTip.y, thumbTip.x, thumbTip.y);
+  const openness = dist(wrist.x, wrist.y, middleTip.x, middleTip.y);
+
+  // mapea coords del video (320x240) al tamaño real del canvas
+  const x = map(indexTip.x, 0, video.width, 0, width);
+  const y = map(indexTip.y, 0, video.height, 0, height);
+  const radius = map(openness, 60, 200, 8, 55, true);
+
+  return {
+    x, y, radius,
+    spraying: pinchDist < PINCH_THRESHOLD
+  };
+}
+
+function spray(x, y, radius, hex) {
+  const c = color(hex);
+  wall.noStroke();
+  for (let i = 0; i < 10; i++) {
+    const a = random(TWO_PI);
+    const r = random(radius);
+    const px = x + cos(a) * r;
+    const py = y + sin(a) * r;
+    wall.fill(red(c), green(c), blue(c), random(15, 45));
+    wall.circle(px, py, random(2, 5));
+  }
+}
+
+function drawNozzleCursor(params) {
+  push();
+  noFill();
+  stroke(params.spraying ? "#c81e1e" : "#8a8478");
+  strokeWeight(1.5);
+  circle(params.x, params.y, params.radius * 2);
+  pop();
+}
+
+function drawCameraPreview() {
+  push();
+  translate(width - 10, 10);
+  const w = 200, h = 150;
+  translate(-w, 0);
+  scale(-1, 1); // efecto espejo, sin esto se siente invertido al pintar
+  image(video, -w, 0, w, h);
+  pop();
+}
+
+function updateStatus(params) {
+  const label = params.spraying ? "PINTANDO" : "moviendo (sin pintar)";
+  select("#statusText").html(`Mano detectada — <strong>${label}</strong>`);
+}
+
+function buildPalette() {
+  const wrap = select("#palette");
+  palette.forEach((hex, i) => {
+    const sw = createDiv("");
+    sw.class("swatch" + (hex === currentColor ? " active" : ""));
+    sw.style("background", hex);
+    sw.parent(wrap);
+    sw.mousePressed(() => {
+      currentColor = hex;
+      selectAll(".swatch").forEach(el => el.removeClass("active"));
+      sw.addClass("active");
+    });
+  });
+}
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+  // el muro NO se redimensiona para no perder lo pintado;
+  // si quieres que se adapte al resize, habría que reescalar wall aquí.
+}
+</script>
+
 </body>
 </html>
