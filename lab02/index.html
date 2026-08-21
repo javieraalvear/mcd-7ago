@@ -107,18 +107,11 @@
   }
   .brushBtn.active, .sceneBtn.active { border-color: #c81e1e; color: #c81e1e; }
 
-  .palette {
-    display: flex;
-    gap: 0.4rem;
-    margin-top: 0.1rem;
+  .hint {
+    font-size: 0.62rem;
+    color: #6b6558;
+    margin: -0.35rem 0 0;
   }
-  .swatch {
-    width: 22px;
-    height: 22px;
-    border: 2px solid transparent;
-    cursor: pointer;
-  }
-  .swatch.active { border-color: #ede9df; }
 
   .colorWheelWrap {
     display: flex;
@@ -153,7 +146,8 @@
 
 <div id="ui">
   <h1>Graffiti gestual</h1>
-  <p class="status" id="statusText">Buscando mano<strong>...</strong></p>
+  <p class="hint">Mano derecha: pinta · Mano izquierda: color</p>
+  <p class="status" id="statusText">Buscando manos<strong>...</strong></p>
 
   <div class="section">
     <label class="label">Escenario</label>
@@ -172,7 +166,6 @@
 
   <div class="section">
     <label class="label">Color</label>
-    <div class="palette" id="palette"></div>
     <div class="colorWheelWrap">
       <canvas id="colorWheel" width="120" height="120"></canvas>
       <div class="currentColor" id="currentColorSwatch"></div>
@@ -201,18 +194,36 @@ let video;
 let hands = [];
 let wall; // buffer persistente = el muro
 
-// gesto: pinch pulgar-índice bajo este umbral = "presionando la boquilla"
-const PINCH_THRESHOLD = 45;
+/* Umbrales con histéresis para el gesto de pellizco: hace falta pellizcar
+   fuerte para EMPEZAR a rociar, pero hay que abrir bastante la mano para
+   DEJAR de rociar. Ese margen evita que el ruido del tracking (temblor de
+   la mano, jitter del modelo) rompa el pellizco cuadro a cuadro mientras
+   ajustas el grosor con la apertura de la mano. */
+const PINCH_START = 42;
+const PINCH_STOP = 60;
 
-const palette = ["#c81e1e", "#ede9df", "#2b6cb0", "#e0a92e", "#111111"];
-let currentColor = palette[0];
+// suavizado exponencial (0 = muy suave/lento, 1 = sin suavizado)
+const POS_SMOOTHING = 0.35;
+const RADIUS_SMOOTHING = 0.15;
+const PINCH_SMOOTHING = 0.25;
+const WHEEL_SMOOTHING = 0.25;
+
+let currentColor = "#c81e1e";
 
 let nozzleScale = 1; // multiplicador manual sobre el radio calculado por gesto
 
 // último punto pintado, para que "marcador" pueda trazar líneas continuas
 let prevX = 0, prevY = 0, isSprayingPrev = false;
 
+// estado suavizado de cada mano; se resetea a null cuando la mano desaparece
+// para que no "arrastre" una línea al reaparecer en otro lugar
+let rightState = null; // { x, y, radius, pinchDist, spraying }
+let leftState = null;  // { cx, cy, px, py }
+
 let isPaused = false; // congela el resultado sin perder lo pintado
+
+let colorWheelGfx; // rueda cromática precalculada, reutilizada en el panel y sobre la mano izquierda
+const COLOR_WHEEL_SIZE = 160;
 
 const scenes = {
   pared: { label: "Pared" },
@@ -300,10 +311,12 @@ function setup() {
 
   handPose.detectStart(video, (results) => { hands = results; });
 
-  buildPalette();
+  colorWheelGfx = buildColorWheelGraphic(COLOR_WHEEL_SIZE);
+  setCurrentColor(currentColor);
+
   buildBrushes();
   buildSceneButtons();
-  buildColorWheel();
+  buildColorWheelPanel();
   select("#clearBtn").mousePressed(() => wall.clear());
   select("#saveBtn").mousePressed(saveArtwork);
   select("#pauseBtn").mousePressed(togglePause);
@@ -319,13 +332,12 @@ function draw() {
 
   drawCameraPreview();
 
-  if (hands.length > 0) {
-    const params = getSprayParams(hands[0]);
+  const rightHand = hands.find(h => h.handedness === "Right");
+  const leftHand = hands.find(h => h.handedness === "Left");
 
-    if (isPaused) {
-      select("#statusText").html('Mano detectada — <strong>PAUSADO</strong>');
-    } else {
-      updateStatus(params);
+  if (rightHand) {
+    const params = getSprayParams(rightHand);
+    if (!isPaused) {
       if (params.spraying) {
         // si recién empezó el gesto, no traza línea desde el punto anterior
         const prev = isSprayingPrev ? { x: prevX, y: prevY } : { x: params.x, y: params.y };
@@ -337,9 +349,17 @@ function draw() {
     }
     drawNozzleCursor({ ...params, spraying: params.spraying && !isPaused });
   } else {
+    rightState = null;
     isSprayingPrev = false;
-    select("#statusText").html(isPaused ? 'Pausado' : 'Buscando mano<strong>...</strong>');
   }
+
+  if (leftHand) {
+    updateColorWheelFromHand(leftHand);
+  } else {
+    leftState = null;
+  }
+
+  updateStatusText(rightHand, leftHand);
 }
 
 function togglePause() {
@@ -348,9 +368,11 @@ function togglePause() {
 }
 
 /* --------------------------------------------------------
-   Traduce los 21 landmarks de la mano a los parámetros que
-   el sistema de spray necesita. Este es el punto exacto que
-   reemplazarías si el input pasa a ser un sensor de movimiento.
+   Traduce los 21 landmarks de la mano derecha a los parámetros
+   que el sistema de spray necesita, suavizando cuadro a cuadro
+   para que el trazo sea fluido y no tiemble con el ruido del
+   tracking. Este es el punto exacto que reemplazarías si el
+   input pasa a ser un sensor de movimiento.
    -------------------------------------------------------- */
 function getSprayParams(hand) {
   const kp = (name) => hand.keypoints.find(p => p.name === name);
@@ -360,17 +382,30 @@ function getSprayParams(hand) {
   const wrist = kp("wrist");
   const middleTip = kp("middle_finger_tip");
 
-  const pinchDist = dist(indexTip.x, indexTip.y, thumbTip.x, thumbTip.y);
+  const rawPinch = dist(indexTip.x, indexTip.y, thumbTip.x, thumbTip.y);
   const openness = dist(wrist.x, wrist.y, middleTip.x, middleTip.y);
 
   // mapea coords del video (320x240) al tamaño real del canvas
-  const x = map(indexTip.x, 0, video.width, 0, width);
-  const y = map(indexTip.y, 0, video.height, 0, height);
-  const radius = map(openness, 60, 200, 8, 55, true) * nozzleScale;
+  const rawX = map(indexTip.x, 0, video.width, 0, width);
+  const rawY = map(indexTip.y, 0, video.height, 0, height);
+  const rawRadius = map(openness, 60, 200, 8, 55, true) * nozzleScale;
+
+  if (!rightState) {
+    // primer cuadro tras aparecer la mano: arranca en el valor real, sin arrastre
+    rightState = { x: rawX, y: rawY, radius: rawRadius, pinchDist: rawPinch, spraying: false };
+  }
+
+  rightState.x = lerp(rightState.x, rawX, POS_SMOOTHING);
+  rightState.y = lerp(rightState.y, rawY, POS_SMOOTHING);
+  rightState.radius = lerp(rightState.radius, rawRadius, RADIUS_SMOOTHING);
+  rightState.pinchDist = lerp(rightState.pinchDist, rawPinch, PINCH_SMOOTHING);
+
+  if (!rightState.spraying && rightState.pinchDist < PINCH_START) rightState.spraying = true;
+  else if (rightState.spraying && rightState.pinchDist > PINCH_STOP) rightState.spraying = false;
 
   return {
-    x, y, radius,
-    spraying: pinchDist < PINCH_THRESHOLD
+    x: rightState.x, y: rightState.y, radius: rightState.radius,
+    spraying: rightState.spraying
   };
 }
 
@@ -469,25 +504,66 @@ function keyPressed() {
   }
 }
 
-function updateStatus(params) {
-  const label = params.spraying ? "PINTANDO" : "moviendo (sin pintar)";
-  select("#statusText").html(`Mano detectada — <strong>${label}</strong>`);
+function updateStatusText(rightHand, leftHand) {
+  if (!rightHand && !leftHand) {
+    select("#statusText").html('Buscando manos<strong>...</strong>');
+    return;
+  }
+  const parts = [];
+  if (rightHand) {
+    const label = isPaused ? "PAUSADO" : (rightState && rightState.spraying ? "PINTANDO" : "moviendo");
+    parts.push(`Der: <strong>${label}</strong>`);
+  }
+  if (leftHand) parts.push("Izq: <strong>color</strong>");
+  select("#statusText").html(parts.join(" · "));
 }
 
-function buildPalette() {
-  const wrap = select("#palette");
-  palette.forEach((hex, i) => {
-    const sw = createDiv("");
-    sw.class("swatch" + (hex === currentColor ? " active" : ""));
-    sw.style("background", hex);
-    sw.parent(wrap);
-    sw.mousePressed(() => {
-      selectAll(".swatch").forEach(el => el.removeClass("active"));
-      sw.addClass("active");
-      setCurrentColor(hex);
-    });
-  });
-  select("#currentColorSwatch").style("background", currentColor);
+/* --------------------------------------------------------
+   Rueda cromática flotante controlada con la mano izquierda:
+   se centra en la muñeca y el dedo índice, dentro de ese
+   círculo, elige matiz (ángulo) y saturación (distancia).
+   -------------------------------------------------------- */
+const COLOR_WHEEL_RADIUS = COLOR_WHEEL_SIZE / 2;
+
+function updateColorWheelFromHand(hand) {
+  const kp = (name) => hand.keypoints.find(p => p.name === name);
+  const wrist = kp("wrist");
+  const indexTip = kp("index_finger_tip");
+
+  const rawCx = map(wrist.x, 0, video.width, 0, width);
+  const rawCy = map(wrist.y, 0, video.height, 0, height);
+  const rawPx = map(indexTip.x, 0, video.width, 0, width);
+  const rawPy = map(indexTip.y, 0, video.height, 0, height);
+
+  if (!leftState) {
+    leftState = { cx: rawCx, cy: rawCy, px: rawPx, py: rawPy };
+  }
+  leftState.cx = lerp(leftState.cx, rawCx, WHEEL_SMOOTHING);
+  leftState.cy = lerp(leftState.cy, rawCy, WHEEL_SMOOTHING);
+  leftState.px = lerp(leftState.px, rawPx, WHEEL_SMOOTHING);
+  leftState.py = lerp(leftState.py, rawPy, WHEEL_SMOOTHING);
+
+  image(colorWheelGfx, leftState.cx - COLOR_WHEEL_RADIUS, leftState.cy - COLOR_WHEEL_RADIUS, COLOR_WHEEL_SIZE, COLOR_WHEEL_SIZE);
+
+  const dx = leftState.px - leftState.cx;
+  const dy = leftState.py - leftState.cy;
+  const rawDist = Math.sqrt(dx * dx + dy * dy);
+  const clampedDist = Math.min(rawDist, COLOR_WHEEL_RADIUS);
+  const angle = Math.atan2(dy, dx);
+  const markerX = leftState.cx + Math.cos(angle) * clampedDist;
+  const markerY = leftState.cy + Math.sin(angle) * clampedDist;
+
+  let angleDeg = angle * 180 / Math.PI;
+  if (angleDeg < 0) angleDeg += 360;
+  const [rr, gg, bb] = hsvToRgb(angleDeg, clampedDist / COLOR_WHEEL_RADIUS, 1);
+  setCurrentColor(rgbToHex(rr, gg, bb));
+
+  push();
+  noFill();
+  stroke(255);
+  strokeWeight(2);
+  circle(markerX, markerY, 12);
+  pop();
 }
 
 function setCurrentColor(hex) {
@@ -510,31 +586,36 @@ function buildBrushes() {
 }
 
 /* --------------------------------------------------------
-   Rosa cromática: pinta una rueda de matiz/saturación en un
-   <canvas> 2D aparte (no en el canvas p5) y traduce clicks
-   en esa rueda a un color hex.
+   Rosa cromática: se calcula una sola vez como p5.Graphics y
+   se reutiliza tanto en el panel (canvas 2D, click/touch para
+   elegir color) como flotando sobre la mano izquierda.
    -------------------------------------------------------- */
-function buildColorWheel() {
-  const cnv = document.getElementById("colorWheel");
-  const ctx = cnv.getContext("2d");
-  const w = cnv.width, h = cnv.height;
-  const cx = w / 2, cy = h / 2, r = w / 2;
-
-  const img = ctx.createImageData(w, h);
-  for (let py = 0; py < h; py++) {
-    for (let px = 0; px < w; px++) {
+function buildColorWheelGraphic(size) {
+  const g = createGraphics(size, size);
+  g.loadPixels();
+  const cx = size / 2, cy = size / 2, r = size / 2;
+  for (let py = 0; py < size; py++) {
+    for (let px = 0; px < size; px++) {
       const dx = px - cx, dy = py - cy;
       const d = Math.sqrt(dx * dx + dy * dy);
-      const idx = (py * w + px) * 4;
+      const idx = 4 * (py * size + px);
       if (d <= r) {
         let angle = Math.atan2(dy, dx) * 180 / Math.PI;
         if (angle < 0) angle += 360;
         const [rr, gg, bb] = hsvToRgb(angle, d / r, 1);
-        img.data[idx] = rr; img.data[idx + 1] = gg; img.data[idx + 2] = bb; img.data[idx + 3] = 255;
+        g.pixels[idx] = rr; g.pixels[idx + 1] = gg; g.pixels[idx + 2] = bb; g.pixels[idx + 3] = 255;
       }
     }
   }
-  ctx.putImageData(img, 0, 0);
+  g.updatePixels();
+  return g;
+}
+
+function buildColorWheelPanel() {
+  const cnv = document.getElementById("colorWheel");
+  const ctx = cnv.getContext("2d");
+  const w = cnv.width, h = cnv.height, cx = w / 2, cy = h / 2, r = w / 2;
+  ctx.drawImage(colorWheelGfx.canvas, 0, 0, w, h);
 
   function pick(clientX, clientY) {
     const rect = cnv.getBoundingClientRect();
@@ -544,7 +625,6 @@ function buildColorWheel() {
     let angle = Math.atan2(dy, dx) * 180 / Math.PI;
     if (angle < 0) angle += 360;
     const [rr, gg, bb] = hsvToRgb(angle, d / r, 1);
-    selectAll(".swatch").forEach(el => el.removeClass("active"));
     setCurrentColor(rgbToHex(rr, gg, bb));
   }
 
