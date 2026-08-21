@@ -57,10 +57,48 @@
   }
   button:hover { border-color: #c81e1e; }
 
+  .section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid #262624;
+  }
+
+  .label {
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #8a8478;
+  }
+
+  input[type="range"] {
+    width: 180px;
+    accent-color: #c81e1e;
+  }
+
+  .brushes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .brushBtn {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    background: #1a1a1a;
+    color: #ede9df;
+    border: 1px solid #3a3a38;
+    padding: 0.35rem 0.6rem;
+    cursor: pointer;
+  }
+  .brushBtn.active { border-color: #c81e1e; color: #c81e1e; }
+
   .palette {
     display: flex;
     gap: 0.4rem;
-    margin-top: 0.3rem;
+    margin-top: 0.1rem;
   }
   .swatch {
     width: 22px;
@@ -69,6 +107,24 @@
     cursor: pointer;
   }
   .swatch.active { border-color: #ede9df; }
+
+  .colorWheelWrap {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.3rem;
+  }
+  #colorWheel {
+    border-radius: 50%;
+    cursor: crosshair;
+    border: 1px solid #3a3a38;
+  }
+  .currentColor {
+    width: 28px;
+    height: 28px;
+    border: 1px solid #3a3a38;
+    flex-shrink: 0;
+  }
 
   #camPreview {
     position: fixed;
@@ -86,7 +142,26 @@
 <div id="ui">
   <h1>Graffiti gestual</h1>
   <p class="status" id="statusText">Buscando mano<strong>...</strong></p>
-  <div class="palette" id="palette"></div>
+
+  <div class="section">
+    <label class="label">Pincel</label>
+    <div class="brushes" id="brushes"></div>
+  </div>
+
+  <div class="section">
+    <label class="label">Grosor boquilla <span id="nozzleVal">1.0x</span></label>
+    <input type="range" id="nozzleSlider" min="0.3" max="2.5" step="0.1" value="1">
+  </div>
+
+  <div class="section">
+    <label class="label">Color</label>
+    <div class="palette" id="palette"></div>
+    <div class="colorWheelWrap">
+      <canvas id="colorWheel" width="120" height="120"></canvas>
+      <div class="currentColor" id="currentColorSwatch"></div>
+    </div>
+  </div>
+
   <button id="clearBtn">Limpiar muro</button>
   <button id="saveBtn">Guardar PNG</button>
 </div>
@@ -112,6 +187,69 @@ const PINCH_THRESHOLD = 45;
 const palette = ["#c81e1e", "#ede9df", "#2b6cb0", "#e0a92e", "#111111"];
 let currentColor = palette[0];
 
+let nozzleScale = 1; // multiplicador manual sobre el radio calculado por gesto
+
+// último punto pintado, para que "marcador" pueda trazar líneas continuas
+let prevX = 0, prevY = 0, isSprayingPrev = false;
+
+const brushes = {
+  spray: {
+    label: "Spray",
+    draw(x, y, radius, hex) {
+      const c = color(hex);
+      wall.noStroke();
+      const density = Math.round(10 * nozzleScale);
+      for (let i = 0; i < density; i++) {
+        const a = random(TWO_PI);
+        const r = random(radius);
+        const px = x + cos(a) * r;
+        const py = y + sin(a) * r;
+        wall.fill(red(c), green(c), blue(c), random(15, 45));
+        wall.circle(px, py, random(2, 5) * nozzleScale);
+      }
+    }
+  },
+  marcador: {
+    label: "Marcador",
+    draw(x, y, radius, hex, prev) {
+      wall.stroke(color(hex));
+      wall.strokeWeight(radius * 0.9);
+      wall.strokeCap(ROUND);
+      wall.line(prev.x, prev.y, x, y);
+    }
+  },
+  goteo: {
+    label: "Goteo",
+    draw(x, y, radius, hex, prev) {
+      brushes.spray.draw(x, y, radius, hex, prev);
+      if (random() < 0.06) {
+        const c = color(hex);
+        wall.noFill();
+        wall.stroke(red(c), green(c), blue(c), 120);
+        wall.strokeWeight(random(1, 2.5));
+        wall.line(x, y, x + random(-3, 3), y + random(20, 80));
+      }
+    }
+  },
+  tiza: {
+    label: "Tiza",
+    draw(x, y, radius, hex) {
+      const c = color(hex);
+      wall.noStroke();
+      const density = Math.round(18 * nozzleScale);
+      for (let i = 0; i < density; i++) {
+        const a = random(TWO_PI);
+        const r = random(radius);
+        const px = x + cos(a) * r;
+        const py = y + sin(a) * r;
+        wall.fill(red(c), green(c), blue(c), random(30, 70));
+        wall.circle(px, py, random(1, 3));
+      }
+    }
+  }
+};
+let currentBrush = "spray";
+
 function preload() {
   handPose = ml5.handPose({ flipped: true }); // flipped: coincide con el mirror del canvas
 }
@@ -130,8 +268,14 @@ function setup() {
   handPose.detectStart(video, (results) => { hands = results; });
 
   buildPalette();
+  buildBrushes();
+  buildColorWheel();
   select("#clearBtn").mousePressed(() => wall.background(20, 20, 18));
   select("#saveBtn").mousePressed(() => saveCanvas(wall, "graffiti-gestual", "png"));
+  select("#nozzleSlider").input(() => {
+    nozzleScale = float(select("#nozzleSlider").value());
+    select("#nozzleVal").html(nozzleScale.toFixed(1) + "x");
+  });
 }
 
 function draw() {
@@ -144,10 +288,16 @@ function draw() {
     updateStatus(params);
 
     if (params.spraying) {
-      spray(params.x, params.y, params.radius, currentColor);
+      // si recién empezó el gesto, no traza línea desde el punto anterior
+      const prev = isSprayingPrev ? { x: prevX, y: prevY } : { x: params.x, y: params.y };
+      brushes[currentBrush].draw(params.x, params.y, params.radius, currentColor, prev);
+      prevX = params.x;
+      prevY = params.y;
     }
+    isSprayingPrev = params.spraying;
     drawNozzleCursor(params);
   } else {
+    isSprayingPrev = false;
     select("#statusText").html('Buscando mano<strong>...</strong>');
   }
 }
@@ -171,25 +321,12 @@ function getSprayParams(hand) {
   // mapea coords del video (320x240) al tamaño real del canvas
   const x = map(indexTip.x, 0, video.width, 0, width);
   const y = map(indexTip.y, 0, video.height, 0, height);
-  const radius = map(openness, 60, 200, 8, 55, true);
+  const radius = map(openness, 60, 200, 8, 55, true) * nozzleScale;
 
   return {
     x, y, radius,
     spraying: pinchDist < PINCH_THRESHOLD
   };
-}
-
-function spray(x, y, radius, hex) {
-  const c = color(hex);
-  wall.noStroke();
-  for (let i = 0; i < 10; i++) {
-    const a = random(TWO_PI);
-    const r = random(radius);
-    const px = x + cos(a) * r;
-    const py = y + sin(a) * r;
-    wall.fill(red(c), green(c), blue(c), random(15, 45));
-    wall.circle(px, py, random(2, 5));
-  }
 }
 
 function drawNozzleCursor(params) {
@@ -224,11 +361,96 @@ function buildPalette() {
     sw.style("background", hex);
     sw.parent(wrap);
     sw.mousePressed(() => {
-      currentColor = hex;
       selectAll(".swatch").forEach(el => el.removeClass("active"));
       sw.addClass("active");
+      setCurrentColor(hex);
     });
   });
+  select("#currentColorSwatch").style("background", currentColor);
+}
+
+function setCurrentColor(hex) {
+  currentColor = hex;
+  select("#currentColorSwatch").style("background", hex);
+}
+
+function buildBrushes() {
+  const wrap = select("#brushes");
+  Object.keys(brushes).forEach((key) => {
+    const btn = createButton(brushes[key].label);
+    btn.class("brushBtn" + (key === currentBrush ? " active" : ""));
+    btn.parent(wrap);
+    btn.mousePressed(() => {
+      currentBrush = key;
+      selectAll(".brushBtn").forEach(el => el.removeClass("active"));
+      btn.addClass("active");
+    });
+  });
+}
+
+/* --------------------------------------------------------
+   Rosa cromática: pinta una rueda de matiz/saturación en un
+   <canvas> 2D aparte (no en el canvas p5) y traduce clicks
+   en esa rueda a un color hex.
+   -------------------------------------------------------- */
+function buildColorWheel() {
+  const cnv = document.getElementById("colorWheel");
+  const ctx = cnv.getContext("2d");
+  const w = cnv.width, h = cnv.height;
+  const cx = w / 2, cy = h / 2, r = w / 2;
+
+  const img = ctx.createImageData(w, h);
+  for (let py = 0; py < h; py++) {
+    for (let px = 0; px < w; px++) {
+      const dx = px - cx, dy = py - cy;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      const idx = (py * w + px) * 4;
+      if (d <= r) {
+        let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+        if (angle < 0) angle += 360;
+        const [rr, gg, bb] = hsvToRgb(angle, d / r, 1);
+        img.data[idx] = rr; img.data[idx + 1] = gg; img.data[idx + 2] = bb; img.data[idx + 3] = 255;
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+
+  function pick(clientX, clientY) {
+    const rect = cnv.getBoundingClientRect();
+    const px = clientX - rect.left, py = clientY - rect.top;
+    const dx = px - cx, dy = py - cy;
+    const d = Math.min(Math.sqrt(dx * dx + dy * dy), r);
+    let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    if (angle < 0) angle += 360;
+    const [rr, gg, bb] = hsvToRgb(angle, d / r, 1);
+    selectAll(".swatch").forEach(el => el.removeClass("active"));
+    setCurrentColor(rgbToHex(rr, gg, bb));
+  }
+
+  let dragging = false;
+  cnv.addEventListener("mousedown", (e) => { dragging = true; pick(e.clientX, e.clientY); });
+  window.addEventListener("mousemove", (e) => { if (dragging) pick(e.clientX, e.clientY); });
+  window.addEventListener("mouseup", () => { dragging = false; });
+  cnv.addEventListener("touchstart", (e) => { pick(e.touches[0].clientX, e.touches[0].clientY); e.preventDefault(); }, { passive: false });
+  cnv.addEventListener("touchmove", (e) => { pick(e.touches[0].clientX, e.touches[0].clientY); e.preventDefault(); }, { passive: false });
+}
+
+function hsvToRgb(h, s, v) {
+  const c = v * s;
+  const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  const m = v - c;
+  let r, g, b;
+  if (h < 60) [r, g, b] = [c, x, 0];
+  else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x];
+  else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+}
+
+function rgbToHex(r, g, b) {
+  return "#" + [r, g, b].map(v => v.toString(16).padStart(2, "0")).join("");
 }
 
 function windowResized() {
