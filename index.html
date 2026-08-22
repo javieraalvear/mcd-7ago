@@ -55,8 +55,8 @@
       top: 6%;
       left: 6%;
       z-index: 3;
-      background: #cbb994;
-      color: #1a1a1a;
+      background: #cef8a2;
+      color: #480052;
       padding: 1.1rem 1.6rem;
       transform: rotate(-4deg);
       box-shadow: 3px 4px 10px rgba(0,0,0,0.4);
@@ -64,12 +64,20 @@
       font-style: italic;
       font-weight: 500;
       transition: filter 0.35s ease;
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
     }
     .ja-archive__label:hover {
       filter: invert(1);
     }
     .ja-archive__label:hover h1 {
       font-family: "UnifrakturMaguntia", serif;
+    }
+    .ja-archive__label.is-dragging {
+      z-index: 10;
+      cursor: grabbing;
+      mix-blend-mode: difference;
     }
     .ja-archive__label h1 {
       margin: 0;
@@ -84,7 +92,8 @@
       letter-spacing: 0.1em;
       text-transform: uppercase;
       margin-top: 0.4rem;
-      color: #4a4231;
+      color: #480052;
+      opacity: 0.75;
     }
     .ja-archive__pin {
       position: absolute;
@@ -452,7 +461,10 @@
         pending = null;
       }
 
-      cards.forEach(function (card) {
+      var label = document.querySelector('.ja-archive__label');
+      var draggables = cards.concat([label]);
+
+      draggables.forEach(function (card) {
         card.addEventListener('mousedown', function (e) {
           if (e.target.closest('.ja-card__toggle')) return;
           onPointerDown(card, e.clientX, e.clientY);
