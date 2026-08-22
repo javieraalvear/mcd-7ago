@@ -218,6 +218,7 @@
     .ja-card--polaroid  { top: 58%; left: 6%;  transform: rotate(4deg); }
     .ja-card--tag       { top: 66%; left: 66%; transform: rotate(-5deg); width: 340px; }
     .ja-card--specimen  { top: 4%;  left: 34%; transform: rotate(1deg); width: 260px; }
+    .ja-card--alfiler   { top: 22%; left: 38%; transform: rotate(-6deg); width: 260px; }
 
     .ja-card--polaroid .ja-card__quote {
       font-style: italic;
@@ -228,6 +229,12 @@
       width: 100%;
       aspect-ratio: 4/3;
       --poster-color: transparent;
+    }
+
+    .ja-card--alfiler .ja-card__body img {
+      display: block;
+      width: 100%;
+      height: auto;
     }
 
     @media (max-width: 900px) {
@@ -263,6 +270,7 @@
       /* columna derecha: 68vw-98vw, sin cruce horizontal con la izquierda */
       .ja-card--sticky   { top: 2vw;  left: 68vw; width: 30vw; }
       .ja-card--specimen { top: 47vw; left: 68vw; width: 30vw; }
+      .ja-card--alfiler  { top: 100vw; left: 68vw; width: 30vw; }
 
       .ja-ref { padding-top: 0.3rem; margin-top: 0.3rem; }
       .ja-ref__cat { font-size: 0.52rem; }
@@ -380,6 +388,14 @@
         </model-viewer>
       </div>
     </div>
+
+    <div class="ja-card ja-card--alfiler">
+      <p class="ja-card__eyebrow">Alfiler_</p>
+      <button type="button" class="ja-card__toggle" aria-label="Minimizar"></button>
+      <div class="ja-card__body">
+        <img src="about/assets/images/alfiler.png" alt="Alfiler con el nombre Javiera">
+      </div>
+    </div>
   </section>
 
   <script>
@@ -485,6 +501,30 @@
         requestAnimationFrame(step);
       }
 
+      function collapseCard(card, body) {
+        var btn = card.querySelector('.ja-card__toggle');
+        body.style.maxHeight = body.scrollHeight + 'px';
+        body.getBoundingClientRect();
+        body.style.maxHeight = '0px';
+        card.classList.add('is-minimized');
+        if (btn) btn.setAttribute('aria-label', 'Maximizar');
+        animateThreads(400);
+      }
+
+      function expandCard(card, body) {
+        var btn = card.querySelector('.ja-card__toggle');
+        card.classList.remove('is-minimized');
+        body.style.maxHeight = body.scrollHeight + 'px';
+        body.addEventListener('transitionend', function handler(ev) {
+          if (ev.propertyName === 'max-height') {
+            body.style.maxHeight = 'none';
+            body.removeEventListener('transitionend', handler);
+          }
+        });
+        if (btn) btn.setAttribute('aria-label', 'Minimizar');
+        animateThreads(400);
+      }
+
       Array.prototype.slice.call(document.querySelectorAll('.ja-card__toggle')).forEach(function (btn) {
         var card = btn.closest('.ja-card');
         var body = card.querySelector('.ja-card__body');
@@ -494,28 +534,25 @@
 
         btn.addEventListener('click', function (e) {
           e.stopPropagation();
-          var minimizing = !card.classList.contains('is-minimized');
-
-          if (minimizing) {
-            body.style.maxHeight = body.scrollHeight + 'px';
-            body.getBoundingClientRect();
-            body.style.maxHeight = '0px';
-            card.classList.add('is-minimized');
-            btn.setAttribute('aria-label', 'Maximizar');
+          if (card.classList.contains('is-minimized')) {
+            expandCard(card, body);
           } else {
-            card.classList.remove('is-minimized');
-            body.style.maxHeight = body.scrollHeight + 'px';
-            body.addEventListener('transitionend', function handler(ev) {
-              if (ev.propertyName === 'max-height') {
-                body.style.maxHeight = 'none';
-                body.removeEventListener('transitionend', handler);
-              }
-            });
-            btn.setAttribute('aria-label', 'Minimizar');
+            collapseCard(card, body);
           }
-
-          animateThreads(400);
         });
+      });
+
+      cards.forEach(function (card) {
+        if (card.classList.contains('ja-card--specimen')) return;
+
+        var body = card.querySelector('.ja-card__body');
+        var btn = card.querySelector('.ja-card__toggle');
+        card.classList.add('is-minimized');
+        body.style.maxHeight = '0px';
+        if (btn) btn.setAttribute('aria-label', 'Maximizar');
+
+        card.addEventListener('mouseenter', function () { expandCard(card, body); });
+        card.addEventListener('mouseleave', function () { collapseCard(card, body); });
       });
 
       window.addEventListener('mousemove', function (e) { onPointerMove(e.clientX, e.clientY); });
