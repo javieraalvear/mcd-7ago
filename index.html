@@ -218,7 +218,6 @@
     .ja-card--polaroid  { top: 58%; left: 6%;  transform: rotate(4deg); }
     .ja-card--tag       { top: 66%; left: 66%; transform: rotate(-5deg); width: 340px; }
     .ja-card--specimen  { top: 4%;  left: 34%; transform: rotate(1deg); width: 260px; }
-    .ja-card--alfiler   { top: 22%; left: 38%; transform: rotate(-6deg); width: 260px; }
 
     .ja-card--polaroid .ja-card__quote {
       font-style: italic;
@@ -231,10 +230,88 @@
       --poster-color: transparent;
     }
 
-    .ja-card--alfiler .ja-card__body img {
+    /* ===== Alfiler: imagen suelta, arrastrable y redimensionable ===== */
+    .ja-pin {
+      position: absolute;
+      top: 20%;
+      left: 38%;
+      width: 260px;
+      z-index: 3;
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+    }
+    .ja-pin.is-dragging {
+      z-index: 10;
+      cursor: grabbing;
+    }
+    .ja-pin img {
       display: block;
       width: 100%;
       height: auto;
+      filter: drop-shadow(3px 5px 10px rgba(0,0,0,0.5));
+    }
+    .ja-pin__resize {
+      position: absolute;
+      right: -3px;
+      bottom: -3px;
+      width: 16px;
+      height: 16px;
+      cursor: nwse-resize;
+      touch-action: none;
+    }
+    .ja-pin__resize::before {
+      content: "";
+      position: absolute;
+      right: 2px;
+      bottom: 2px;
+      width: 8px;
+      height: 8px;
+      border-right: 2px solid rgba(255,255,255,0.6);
+      border-bottom: 2px solid rgba(255,255,255,0.6);
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+    .ja-pin:hover .ja-pin__resize::before,
+    .ja-pin.is-resizing .ja-pin__resize::before,
+    .ja-pin.is-dragging .ja-pin__resize::before {
+      opacity: 1;
+    }
+    .ja-pin__resize:hover::before {
+      border-color: #fff;
+    }
+
+    .ja-pin__rotate {
+      position: absolute;
+      top: -20px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.6);
+      cursor: grab;
+      touch-action: none;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+    .ja-pin__rotate::before {
+      content: "";
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      width: 1px;
+      height: 8px;
+      background: rgba(255,255,255,0.6);
+      transform: translateX(-50%);
+    }
+    .ja-pin:hover .ja-pin__rotate,
+    .ja-pin.is-rotating .ja-pin__rotate,
+    .ja-pin.is-dragging .ja-pin__rotate {
+      opacity: 1;
+    }
+    .ja-pin__rotate:hover {
+      border-color: #fff;
     }
 
     @media (max-width: 900px) {
@@ -270,7 +347,10 @@
       /* columna derecha: 68vw-98vw, sin cruce horizontal con la izquierda */
       .ja-card--sticky   { top: 2vw;  left: 68vw; width: 30vw; }
       .ja-card--specimen { top: 47vw; left: 68vw; width: 30vw; }
-      .ja-card--alfiler  { top: 100vw; left: 68vw; width: 30vw; }
+
+      .ja-pin { top: 100vw; left: 68vw; width: 30vw; }
+      .ja-pin__resize { width: 14px; height: 14px; }
+      .ja-pin__resize::before, .ja-pin__rotate { opacity: 1; }
 
       .ja-ref { padding-top: 0.3rem; margin-top: 0.3rem; }
       .ja-ref__cat { font-size: 0.52rem; }
@@ -303,7 +383,7 @@
           a2.3 2.3 0 1 0 -4.6 0 Z
         "/>
       </svg>
-      <h1>Javiera<br>Alvear S.</h1>
+      <h1>Alvear Soto</h1>
       <span>Diseñadora industrial</span>
     </div>
 
@@ -389,12 +469,10 @@
       </div>
     </div>
 
-    <div class="ja-card ja-card--alfiler">
-      <p class="ja-card__eyebrow">Alfiler_</p>
-      <button type="button" class="ja-card__toggle" aria-label="Minimizar"></button>
-      <div class="ja-card__body">
-        <img src="about/assets/images/alfiler.png" alt="Alfiler con el nombre Javiera">
-      </div>
+    <div class="ja-pin">
+      <img src="about/assets/images/alfiler.png" alt="Alfiler con el nombre Javiera" draggable="false">
+      <span class="ja-pin__rotate" aria-hidden="true"></span>
+      <span class="ja-pin__resize" aria-hidden="true"></span>
     </div>
   </section>
 
@@ -478,19 +556,95 @@
       }
 
       var label = document.querySelector('.ja-archive__label');
-      var draggables = cards.concat([label]);
+      var pin = document.querySelector('.ja-pin');
+      var draggables = cards.concat([label, pin]);
 
       draggables.forEach(function (card) {
         card.addEventListener('mousedown', function (e) {
-          if (e.target.closest('.ja-card__toggle')) return;
+          if (e.target.closest('.ja-card__toggle') || e.target.closest('.ja-pin__resize') || e.target.closest('.ja-pin__rotate')) return;
           onPointerDown(card, e.clientX, e.clientY);
         });
         card.addEventListener('touchstart', function (e) {
-          if (e.target.closest('.ja-card__toggle')) return;
+          if (e.target.closest('.ja-card__toggle') || e.target.closest('.ja-pin__resize') || e.target.closest('.ja-pin__rotate')) return;
           var t = e.touches[0];
           onPointerDown(card, t.clientX, t.clientY);
         }, { passive: true });
       });
+
+      var resizeState = null;
+
+      function beginResize(x, startWidth) {
+        resizeState = { startX: x, startWidth: startWidth };
+        pin.classList.add('is-resizing');
+      }
+      function resizeMove(x) {
+        if (!resizeState) return;
+        var newWidth = resizeState.startWidth + (x - resizeState.startX);
+        newWidth = Math.max(80, Math.min(newWidth, 900));
+        pin.style.width = newWidth + 'px';
+      }
+      function endResize() {
+        resizeState = null;
+        pin.classList.remove('is-resizing');
+      }
+
+      var pinResize = pin.querySelector('.ja-pin__resize');
+      pinResize.addEventListener('mousedown', function (e) {
+        e.stopPropagation();
+        beginResize(e.clientX, pin.offsetWidth);
+      });
+      pinResize.addEventListener('touchstart', function (e) {
+        e.stopPropagation();
+        var t = e.touches[0];
+        beginResize(t.clientX, pin.offsetWidth);
+      }, { passive: true });
+
+      var pinRotation = 0;
+      var rotateState = null;
+
+      function beginRotate(x, y) {
+        var rect = pin.getBoundingClientRect();
+        var cx = rect.left + rect.width / 2;
+        var cy = rect.top + rect.height / 2;
+        var startAngle = Math.atan2(y - cy, x - cx) * 180 / Math.PI;
+        rotateState = { cx: cx, cy: cy, startAngle: startAngle, startRotation: pinRotation };
+        pin.classList.add('is-rotating');
+      }
+      function rotateMove(x, y) {
+        if (!rotateState) return;
+        var angle = Math.atan2(y - rotateState.cy, x - rotateState.cx) * 180 / Math.PI;
+        pinRotation = rotateState.startRotation + (angle - rotateState.startAngle);
+        pin.style.transform = 'rotate(' + pinRotation + 'deg)';
+      }
+      function endRotate() {
+        rotateState = null;
+        pin.classList.remove('is-rotating');
+      }
+
+      var pinRotate = pin.querySelector('.ja-pin__rotate');
+      pinRotate.addEventListener('mousedown', function (e) {
+        e.stopPropagation();
+        beginRotate(e.clientX, e.clientY);
+      });
+      pinRotate.addEventListener('touchstart', function (e) {
+        e.stopPropagation();
+        var t = e.touches[0];
+        beginRotate(t.clientX, t.clientY);
+      }, { passive: true });
+
+      window.addEventListener('mousemove', function (e) {
+        resizeMove(e.clientX);
+        rotateMove(e.clientX, e.clientY);
+      });
+      window.addEventListener('touchmove', function (e) {
+        if (!resizeState && !rotateState) return;
+        var t = e.touches[0];
+        resizeMove(t.clientX);
+        rotateMove(t.clientX, t.clientY);
+        e.preventDefault();
+      }, { passive: false });
+      window.addEventListener('mouseup', function () { endResize(); endRotate(); });
+      window.addEventListener('touchend', function () { endResize(); endRotate(); });
 
       function animateThreads(duration) {
         var start = performance.now();
