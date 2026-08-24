@@ -217,14 +217,28 @@
     .ja-card--torn      { top: 40%; left: 62%; transform: rotate(-2deg); }
     .ja-card--polaroid  { top: 58%; left: 6%;  transform: rotate(4deg); }
     .ja-card--tag       { top: 66%; left: 66%; transform: rotate(-5deg); width: 340px; }
-    .ja-card--specimen  { top: 4%;  left: 34%; transform: rotate(1deg); width: 260px; }
 
     .ja-card--polaroid .ja-card__quote {
       font-style: italic;
       font-family: "Newsreader", serif;
     }
 
-    .ja-card--specimen model-viewer {
+    /* ===== Objeto: model-viewer suelto, arrastrable ===== */
+    .ja-object {
+      position: absolute;
+      top: 4%;
+      left: 34%;
+      width: 260px;
+      z-index: 3;
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+    }
+    .ja-object.is-dragging {
+      z-index: 10;
+      cursor: grabbing;
+    }
+    .ja-object model-viewer {
       width: 100%;
       aspect-ratio: 4/3;
       --poster-color: transparent;
@@ -346,7 +360,7 @@
 
       /* columna derecha: 68vw-98vw, sin cruce horizontal con la izquierda */
       .ja-card--sticky   { top: 2vw;  left: 68vw; width: 30vw; }
-      .ja-card--specimen { top: 47vw; left: 68vw; width: 30vw; }
+      .ja-object         { top: 47vw; left: 68vw; width: 30vw; }
 
       .ja-pin { top: 100vw; left: 68vw; width: 30vw; }
       .ja-pin__resize { width: 14px; height: 14px; }
@@ -455,18 +469,14 @@
       </div>
     </div>
 
-    <div class="ja-card ja-card--specimen">
-      <p class="ja-card__eyebrow">Objeto_</p>
-      <button type="button" class="ja-card__toggle" aria-label="Minimizar"></button>
-      <div class="ja-card__body">
-        <model-viewer
-          src="about/assets/models/spider.glb"
-          alt="Modelo 3D de referencia"
-          camera-controls
-          auto-rotate
-          shadow-intensity="1">
-        </model-viewer>
-      </div>
+    <div class="ja-object">
+      <model-viewer
+        src="about/assets/models/spider.glb"
+        alt="Modelo 3D de referencia"
+        camera-controls
+        auto-rotate
+        shadow-intensity="1">
+      </model-viewer>
     </div>
 
     <div class="ja-pin">
@@ -557,7 +567,8 @@
 
       var label = document.querySelector('.ja-archive__label');
       var pin = document.querySelector('.ja-pin');
-      var draggables = cards.concat([label, pin]);
+      var object3d = document.querySelector('.ja-object');
+      var draggables = cards.concat([label, pin, object3d]);
 
       draggables.forEach(function (card) {
         card.addEventListener('mousedown', function (e) {
@@ -655,8 +666,16 @@
         requestAnimationFrame(step);
       }
 
+      function cancelPendingMaxHeightReset(body) {
+        if (body._maxHeightHandler) {
+          body.removeEventListener('transitionend', body._maxHeightHandler);
+          body._maxHeightHandler = null;
+        }
+      }
+
       function collapseCard(card, body) {
         var btn = card.querySelector('.ja-card__toggle');
+        cancelPendingMaxHeightReset(body);
         body.style.maxHeight = body.scrollHeight + 'px';
         body.getBoundingClientRect();
         body.style.maxHeight = '0px';
@@ -667,14 +686,18 @@
 
       function expandCard(card, body) {
         var btn = card.querySelector('.ja-card__toggle');
+        cancelPendingMaxHeightReset(body);
         card.classList.remove('is-minimized');
         body.style.maxHeight = body.scrollHeight + 'px';
-        body.addEventListener('transitionend', function handler(ev) {
+        var handler = function (ev) {
           if (ev.propertyName === 'max-height') {
             body.style.maxHeight = 'none';
             body.removeEventListener('transitionend', handler);
+            body._maxHeightHandler = null;
           }
-        });
+        };
+        body._maxHeightHandler = handler;
+        body.addEventListener('transitionend', handler);
         if (btn) btn.setAttribute('aria-label', 'Minimizar');
         animateThreads(400);
       }
@@ -697,8 +720,6 @@
       });
 
       cards.forEach(function (card) {
-        if (card.classList.contains('ja-card--specimen')) return;
-
         var body = card.querySelector('.ja-card__body');
         var btn = card.querySelector('.ja-card__toggle');
         card.classList.add('is-minimized');
