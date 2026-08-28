@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Campo de Datos 01 · Biometría bajo estrés</title>
+  <title>Campo de Datos 01 · Corrupción biométrica</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -11,127 +11,69 @@
     <section class="viewport-shell">
       <header class="project-header">
         <p class="eyebrow">COMPUTACIÓN AVANZADA · MCD UAI</p>
-        <h1>Biometría bajo estrés</h1>
-        <p class="subtitle">WESAD: señales de muñeca (EDA, BVP) de 15 sujetos en tres condiciones — baseline, estrés, diversión — transformadas en geometría.</p>
+        <h1>La imagen es el dato</h1>
+        <p class="subtitle">WESAD: EDA, variabilidad de pulso y temperatura de muñeca de un sujeto corrompen en vivo una fotografía, canal por canal, técnica por técnica. No hay gráfico: la distorsión es la visualización.</p>
       </header>
 
-      <div id="viewport"></div>
-
-      <div class="legend">
-        <span><i class="dot" style="background:#7c8b99"></i>Baseline</span>
-        <span><i class="dot" style="background:#c1443b"></i>Estrés</span>
-        <span><i class="dot" style="background:#d9a441"></i>Diversión</span>
+      <div id="viewport">
+        <canvas id="lienzo"></canvas>
       </div>
 
-      <div class="hint">Arrastra para orbitar · Rueda para acercar · Click en un módulo para inspeccionarlo</div>
+      <p id="aviso-imagen" class="aviso-imagen" hidden>
+        No se encontró una imagen en <code>assets/images/</code> (retrato.jpg / .jpeg / .png). Mostrando una silueta de referencia generada por código.
+      </p>
+
+      <div class="hint">Selecciona un sujeto y reproduce su sesión completa</div>
     </section>
 
     <aside class="controls-panel">
       <div class="panel-header">
-        <p class="eyebrow">FUENTE + REPRESENTACIÓN</p>
+        <p class="eyebrow">FUENTE + REPRODUCCIÓN</p>
         <h2>Dataset propio</h2>
       </div>
 
       <section class="status-card">
         <div class="status-row">
-          <span>Fuente</span>
-          <strong id="fuente-label">Cargando…</strong>
-        </div>
-        <div class="status-row">
-          <span>Estado</span>
+          <span>CSV</span>
           <strong id="estado-label"><i class="status-dot"></i> cargando</strong>
         </div>
         <div class="status-row">
-          <span>Sujetos / bloques</span>
-          <strong id="conteo-label">—</strong>
+          <span>Imagen</span>
+          <strong id="imagen-label">cargando…</strong>
         </div>
       </section>
 
       <section class="control-group">
-        <h3>Filtros</h3>
-
         <label class="select-label">
           <span>Sujeto</span>
-          <select id="filtro-sujeto">
-            <option value="todos">Todos</option>
-          </select>
+          <select id="filtro-sujeto"></select>
         </label>
 
-        <label class="select-label">
-          <span>Condición</span>
-          <select id="filtro-condicion">
-            <option value="todas">Todas</option>
-            <option value="baseline">Baseline</option>
-            <option value="stress">Estrés</option>
-            <option value="amusement">Diversión</option>
-          </select>
-        </label>
-
-        <label class="select-label">
-          <span>Distribución</span>
-          <select id="modo-distribucion">
-            <option value="temporal">Temporal · línea de tiempo por sujeto</option>
-            <option value="condicion">Agrupada · por condición</option>
-          </select>
-        </label>
+        <button id="reproducir">Reproducir sesión</button>
       </section>
 
-      <section class="control-group">
-        <h3>Representación</h3>
-
-        <label>
-          <span>Escala altura (EDA)</span>
-          <output id="escala-altura-valor">1.20</output>
-          <input id="escala-altura" type="range" min="0.3" max="2.5" step="0.1" value="1.2" />
-        </label>
-
-        <label>
-          <span>Escala ancho (variabilidad BVP)</span>
-          <output id="escala-ancho-valor">1.00</output>
-          <input id="escala-ancho" type="range" min="0.3" max="2.0" step="0.1" value="1.0" />
-        </label>
-
-        <label>
-          <span>Bloques por sujeto</span>
-          <output id="buckets-valor">20</output>
-          <input id="buckets" type="range" min="8" max="40" step="1" value="20" />
-        </label>
+      <section class="condicion-card">
+        <span class="condicion-eyebrow">Condición activa</span>
+        <strong id="condicion-label" data-condicion="">—</strong>
+        <p class="condicion-nota">Solo para verificar durante el desarrollo — no es una leyenda de color: baseline, estrés y diversión se distinguen por qué combinación de técnicas se activa, no por un tono.</p>
       </section>
 
       <section class="mapping">
-        <h3>Reglas de representación</h3>
-        <div class="map-row"><b>EDA promedio (norm. por sujeto)</b><span>→</span><em>altura</em></div>
-        <div class="map-row"><b>variabilidad de BVP</b><span>→</span><em>ancho</em></div>
-        <div class="map-row"><b>condición dominante</b><span>→</span><em>color</em></div>
-        <div class="map-row"><b>tiempo / sujeto</b><span>→</span><em>posición X / Z</em></div>
+        <h3>Mapeos (uno por variable)</h3>
+        <div class="map-row"><b>EDA norm. por sujeto</b><span>→</span><em>pixel sorting</em></div>
+        <div class="map-row"><b>variabilidad de BVP</b><span>→</span><em>frame bleed</em></div>
+        <div class="map-row"><b>temp_mean (invertido)</b><span>→</span><em>aberración cromática</em></div>
       </section>
 
-      <section class="inspector">
-        <h3>Bloque seleccionado</h3>
-        <p id="bloque-nombre">Haz click sobre un módulo.</p>
-        <div class="metric-grid">
-          <div><span>Sujeto</span><strong id="m-sujeto">—</strong></div>
-          <div><span>Condición</span><strong id="m-condicion">—</strong></div>
-          <div><span>EDA (crudo)</span><strong id="m-eda">—</strong></div>
-          <div><span>Variab. BVP</span><strong id="m-bvp">—</strong></div>
-        </div>
+      <section class="mapping">
+        <h3>Gramática por condición</h3>
+        <div class="map-row"><b>baseline</b><span>→</span><em>las tres técnicas casi apagadas</em></div>
+        <div class="map-row"><b>estrés</b><span>→</span><em>sorting agresivo + aberración marcada + bleed errático</em></div>
+        <div class="map-row"><b>diversión</b><span>→</span><em>bleed rítmico, sorting leve, sin aberración</em></div>
       </section>
-
-      <div class="actions">
-        <button id="reproducir">Reproducir barrido temporal</button>
-        <button id="reconstruir" class="secondary">Reconstruir</button>
-      </div>
     </aside>
   </main>
 
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
-      }
-    }
-  </script>
   <script type="module" src="./main.js"></script>
 </body>
 </html>

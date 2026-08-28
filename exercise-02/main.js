@@ -1,6 +1,3 @@
-import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-
 // ======================================================
 // 01 — CONFIGURACIÓN
 // ======================================================
@@ -8,90 +5,81 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 // wesad_light.csv fue generado preprocesando los .pkl originales de
 // 15 sujetos: EDA/BVP/TEMP de la muñeca, agregados en ventanas de 5s,
 // etiquetadas con la condición dominante en esa ventana.
+//
+// Este ejercicio no grafica esos datos: los usa para corromper en
+// vivo una imagen real sobre un <canvas> 2D. La distorsión ES la
+// visualización — no hay barras, ejes ni leyendas de color.
 
 const RUTA_CSV = "./assets/data/wesad_light.csv";
+const NOMBRES_IMAGEN = ["retrato.jpg", "retrato.jpeg", "retrato.png"];
 
-const COLOR_CONDICION = {
-  baseline: 0x7c8b99,
-  stress: 0xc1443b,
-  amusement: 0xd9a441,
+const ANCHO_MAX_LIENZO = 520;
+const BLOQUES_POR_SESION = 60;      // resolución temporal de la sesión
+const DURACION_BLOQUE_MS = 550;     // cuánto "dura" cada bloque al reproducir
+const INTERVALO_RECALCULO_MS = 90;  // el glitch se recalcula ~11 veces/seg,
+                                     // no cada frame: el "stepping" es parte
+                                     // de la estética, no una limitación oculta.
+
+const nombresCondicion = {
+  baseline: "Baseline",
+  stress: "Estrés",
+  amusement: "Diversión",
 };
 
-const parametros = {
-  sujeto: "todos",
-  condicion: "todas",
-  modo: "temporal",
-  escalaAltura: 1.2,
-  escalaAncho: 1.0,
-  bucketsPorSujeto: 20,
+// GRAMÁTICA POR CONDICIÓN
+// --------------------------------------------------------------
+// Las tres condiciones no se pintan de un color distinto: activan
+// las mismas tres técnicas con pesos y modos de modulación distintos.
+// "sort"/"aberr"/"bleed" multiplican la intensidad que ya viene de
+// los datos; "sortEjes" y "bleedModo" cambian la TEXTURA, no solo
+// la magnitud.
+const GRAMATICA = {
+  baseline: {
+    sort: 0.12,
+    sortEjes: "fila",
+    aberr: 0.15,
+    bleed: 0.14,
+    bleedModo: "plano", // casi sin modulación en el tiempo
+  },
+  stress: {
+    sort: 1.5,
+    sortEjes: "ambos", // filas Y columnas: textura "desgarrada"
+    aberr: 1.6,
+    bleed: 1.1,
+    bleedModo: "erratico", // salta de golpe, cambia de signo
+  },
+  amusement: {
+    sort: 0.4,
+    sortEjes: "fila",
+    aberr: 0, // aberración cromática desactivada por completo
+    bleed: 0.85,
+    bleedModo: "ritmico", // oscila suave, tipo respiración
+  },
 };
 
-let filas = [];           // filas crudas del CSV
-let sujetosOrdenados = [];
-let rangoEdaPorSujeto = new Map(); // sujeto -> {min, max}
-let bloques = [];         // buckets actualmente representados
-let objetosBloque = [];
-
-let reproduciendo = false;
-let cursorTemporal = 0; // 0..1, posición del barrido
-
 // ======================================================
-// 02 — ESCENA
+// 02 — LIENZO
 // ======================================================
 
-const viewport = document.querySelector("#viewport");
-const escena = new THREE.Scene();
-escena.background = new THREE.Color(0x0b0b0c);
+const lienzo = document.querySelector("#lienzo");
+let ctx = null;
+let anchoLienzo = 0;
+let altoLienzo = 0;
 
-const camara = new THREE.PerspectiveCamera(
-  42,
-  viewport.clientWidth / viewport.clientHeight,
-  0.1,
-  400
-);
-camara.position.set(30, 52, 42);
-
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(viewport.clientWidth, viewport.clientHeight);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-viewport.appendChild(renderer.domElement);
-
-const controlesOrbita = new OrbitControls(camara, renderer.domElement);
-controlesOrbita.enableDamping = true;
-controlesOrbita.target.set(0, 2, 0);
-
-escena.add(new THREE.HemisphereLight(0xf2eee4, 0x1f2228, 1.8));
-
-const luzPrincipal = new THREE.DirectionalLight(0xffffff, 2.7);
-luzPrincipal.position.set(18, 28, 14);
-luzPrincipal.castShadow = true;
-escena.add(luzPrincipal);
-
-const suelo = new THREE.Mesh(
-  new THREE.PlaneGeometry(140, 140),
-  new THREE.MeshStandardMaterial({ color: 0x101114, roughness: 1 })
-);
-suelo.rotation.x = -Math.PI / 2;
-suelo.position.y = -0.02;
-suelo.receiveShadow = true;
-escena.add(suelo);
-
-const grilla = new THREE.GridHelper(100, 50, 0x34383d, 0x1e2024);
-grilla.position.y = 0.001;
-escena.add(grilla);
-
-const grupoBloques = new THREE.Group();
-escena.add(grupoBloques);
+let pristinoData = null;   // ImageData original, nunca se modifica
+let bufferAnterior = null; // salida del frame anterior (para el frame bleed)
+let imageDataSalida = null;
 
 // ======================================================
 // 03 — DATOS: FETCH + PARSEO DE CSV
 // ======================================================
 
+let filas = [];
+let sujetosOrdenados = [];
+let sesionActual = { sujeto: null, bloques: [] };
+
 async function cargarDatos() {
-  actualizarEstadoConexion("cargando");
+  actualizarEstadoDatos("cargando");
 
   try {
     const respuesta = await fetch(RUTA_CSV, { cache: "no-store" });
@@ -100,19 +88,17 @@ async function cargarDatos() {
     const texto = await respuesta.text();
     filas = parsearCSV(texto);
 
-    prepararSujetosYRangos();
+    sujetosOrdenados = [...new Set(filas.map((fila) => fila.subject))].sort(
+      (a, b) => Number(a.slice(1)) - Number(b.slice(1))
+    );
+
     poblarSelectorSujetos();
+    actualizarEstadoDatos("listo");
 
-    actualizarEstadoConexion("listo");
-    document.querySelector("#fuente-label").textContent =
-      "WESAD · dataset propio (CSV)";
-
-    generarRepresentacion();
+    seleccionarSujeto(sujetosOrdenados[0]);
   } catch (error) {
     console.error("No fue posible cargar wesad_light.csv", error);
-    actualizarEstadoConexion("error");
-    document.querySelector("#fuente-label").textContent =
-      "Error cargando el CSV";
+    actualizarEstadoDatos("error");
   }
 }
 
@@ -132,24 +118,6 @@ function parsearCSV(texto) {
   });
 }
 
-function prepararSujetosYRangos() {
-  sujetosOrdenados = [...new Set(filas.map((fila) => fila.subject))].sort(
-    (a, b) => Number(a.slice(1)) - Number(b.slice(1))
-  );
-
-  rangoEdaPorSujeto = new Map();
-  sujetosOrdenados.forEach((sujeto) => {
-    const valoresEda = filas
-      .filter((fila) => fila.subject === sujeto)
-      .map((fila) => fila.eda_mean);
-
-    rangoEdaPorSujeto.set(sujeto, {
-      min: Math.min(...valoresEda),
-      max: Math.max(...valoresEda),
-    });
-  });
-}
-
 function poblarSelectorSujetos() {
   const selector = document.querySelector("#filtro-sujeto");
   sujetosOrdenados.forEach((sujeto) => {
@@ -161,19 +129,26 @@ function poblarSelectorSujetos() {
 }
 
 // ======================================================
-// 04 — REGLAS: INPUT → RELACIÓN → OUTPUT
+// 04 — BLOQUES TEMPORALES DE LA SESIÓN
 // ======================================================
+// Agrupa las filas de un sujeto en N bloques temporales, promediando
+// (o, en el caso de BVP, midiendo la variabilidad de) las señales
+// dentro de cada bloque. La sesión se reproduce recorriendo estos
+// bloques en orden, no fila por fila.
 
-function normalizarEda(fila) {
-  const rango = rangoEdaPorSujeto.get(fila.subject);
+function normalizarEda(fila, rango) {
   if (!rango || rango.max === rango.min) return 0.5;
   return (fila.eda_mean - rango.min) / (rango.max - rango.min);
 }
 
-// Agrupa las filas de un sujeto en N bloques temporales,
-// promediando las variables biométricas dentro de cada bloque.
-// Esto es una decisión de diseño: no representamos cada ventana
-// de 5s (miles de filas), sino una versión legible y comparable.
+function desviacionEstandar(valores) {
+  if (valores.length === 0) return 0;
+  const media = valores.reduce((acc, v) => acc + v, 0) / valores.length;
+  const varianza =
+    valores.reduce((acc, v) => acc + (v - media) ** 2, 0) / valores.length;
+  return Math.sqrt(varianza);
+}
+
 function construirBloquesDeSujeto(sujeto, n) {
   const filasSujeto = filas
     .filter((fila) => fila.subject === sujeto)
@@ -181,19 +156,22 @@ function construirBloquesDeSujeto(sujeto, n) {
 
   if (filasSujeto.length === 0) return [];
 
+  const valoresEda = filasSujeto.map((fila) => fila.eda_mean);
+  const rangoEda = { min: Math.min(...valoresEda), max: Math.max(...valoresEda) };
+
   const tInicio = filasSujeto[0].window_start_s;
   const tFin = filasSujeto[filasSujeto.length - 1].window_start_s;
   const duracion = Math.max(1, tFin - tInicio);
 
-  const bloques = Array.from({ length: n }, () => []);
+  const grupos = Array.from({ length: n }, () => []);
 
   filasSujeto.forEach((fila) => {
     const posicion = (fila.window_start_s - tInicio) / duracion;
     const indice = Math.min(n - 1, Math.floor(posicion * n));
-    bloques[indice].push(fila);
+    grupos[indice].push(fila);
   });
 
-  return bloques
+  return grupos
     .map((grupo, indice) => {
       if (grupo.length === 0) return null;
 
@@ -206,742 +184,431 @@ function construirBloquesDeSujeto(sujeto, n) {
         (a, b) => b[1] - a[1]
       )[0][0];
 
-      const edaNormPromedio =
-        grupo.reduce((acc, fila) => acc + normalizarEda(fila), 0) /
+      const edaNorm =
+        grupo.reduce((acc, fila) => acc + normalizarEda(fila, rangoEda), 0) /
         grupo.length;
-      const edaCrudoPromedio =
-        grupo.reduce((acc, fila) => acc + fila.eda_mean, 0) / grupo.length;
-      const bvpStdPromedio =
-        grupo.reduce((acc, fila) => acc + fila.bvp_std, 0) / grupo.length;
+
+      // El CSV no trae un "bvp_std" por ventana: lo construimos aquí
+      // como la desviación estándar del bvp_mean de las ventanas de 5s
+      // que caen dentro de este bloque. Eso SÍ es variabilidad de pulso
+      // real, calculada a partir del dato crudo, no inventada.
+      const bvpStd = desviacionEstandar(grupo.map((fila) => fila.bvp_mean));
+
+      const tempMean =
+        grupo.reduce((acc, fila) => acc + fila.temp_mean, 0) / grupo.length;
 
       return {
         sujeto,
+        indice,
         posicionTemporal: indice / (n - 1 || 1),
         condicion: condicionDominante,
-        edaNorm: edaNormPromedio,
-        edaCrudo: edaCrudoPromedio,
-        bvpStd: bvpStdPromedio,
+        edaNorm,
+        bvpStd,
+        tempMean,
       };
     })
     .filter(Boolean);
 }
 
-function aplicarFiltros(listaBloques) {
-  return listaBloques.filter((bloque) => {
-    const pasaSujeto =
-      parametros.sujeto === "todos" || bloque.sujeto === parametros.sujeto;
-    const pasaCondicion =
-      parametros.condicion === "todas" ||
-      bloque.condicion === parametros.condicion;
-    return pasaSujeto && pasaCondicion;
-  });
+// Normaliza bvpStd y tempMean 0..1 dentro de la propia sesión del
+// sujeto, igual que edaNorm ya viene normalizado por sujeto. Cada
+// sesión usa su propio rango dinámico.
+function normalizarSesion(bloques) {
+  const valoresBvp = bloques.map((b) => b.bvpStd);
+  const valoresTemp = bloques.map((b) => b.tempMean);
+
+  const bvpMin = Math.min(...valoresBvp);
+  const bvpMax = Math.max(...valoresBvp);
+  const tempMin = Math.min(...valoresTemp);
+  const tempMax = Math.max(...valoresTemp);
+
+  return bloques.map((b) => ({
+    ...b,
+    bvpStdNorm: bvpMax > bvpMin ? (b.bvpStd - bvpMin) / (bvpMax - bvpMin) : 0.5,
+    tempNorm: tempMax > tempMin ? (b.tempMean - tempMin) / (tempMax - tempMin) : 0.5,
+  }));
 }
 
-function distribuirTemporalmente(listaBloques) {
-  const sujetosVisibles =
-    parametros.sujeto === "todos" ? sujetosOrdenados : [parametros.sujeto];
-  const anchoLinea = 42;
-  const separacionFilas = 2.6;
+function seleccionarSujeto(sujeto) {
+  const crudos = construirBloquesDeSujeto(sujeto, BLOQUES_POR_SESION);
+  sesionActual = { sujeto, bloques: normalizarSesion(crudos) };
 
-  return listaBloques.map((bloque) => {
-    const filaSujeto = sujetosVisibles.indexOf(bloque.sujeto);
-    return {
-      ...bloque,
-      x: (bloque.posicionTemporal - 0.5) * anchoLinea,
-      z: (filaSujeto - sujetosVisibles.length / 2) * separacionFilas,
-    };
-  });
+  tiempoAcumuladoMs = 0;
+  reproduciendo = false;
+  document.querySelector("#reproducir").textContent = "Reproducir sesión";
+  document.querySelector("#filtro-sujeto").value = sujeto;
+
+  dibujarFramePristino();
 }
 
-function distribuirPorCondicion(listaBloques) {
-  const condiciones = ["baseline", "stress", "amusement"];
-  const separacionZonas = 18;
-  const separacionGrilla = 1.6;
+// ======================================================
+// 05 — TÉCNICAS DE GLITCH
+// ======================================================
+// Cada técnica lee UNA variable y no sabe nada de las otras dos.
+// La condición no aparece aquí adentro: solo entra como pesos
+// (ver GRAMATICA) que el motor de reproducción aplica por fuera.
 
-  return condiciones.flatMap((condicion, indiceZona) => {
-    const bloquesCondicion = listaBloques.filter(
-      (bloque) => bloque.condicion === condicion
+function clamp(valor, min, max) {
+  return Math.max(min, Math.min(max, valor));
+}
+
+// --- 1. EDA (arousal) → pixel sorting -------------------------------
+
+function ordenarSegmento(data, ancho, indiceLinea, inicio, fin, esFila) {
+  const n = fin - inicio;
+  if (n <= 1) return;
+
+  const pixeles = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const coord = inicio + i;
+    const idx = esFila
+      ? (indiceLinea * ancho + coord) * 4
+      : (coord * ancho + indiceLinea) * 4;
+    const r = data[idx];
+    const g = data[idx + 1];
+    const b = data[idx + 2];
+    const a = data[idx + 3];
+    const luminancia = 0.299 * r + 0.587 * g + 0.114 * b;
+    pixeles[i] = [luminancia, r, g, b, a];
+  }
+
+  pixeles.sort((p1, p2) => p1[0] - p2[0]);
+
+  for (let i = 0; i < n; i++) {
+    const coord = inicio + i;
+    const idx = esFila
+      ? (indiceLinea * ancho + coord) * 4
+      : (coord * ancho + indiceLinea) * 4;
+    data[idx] = pixeles[i][1];
+    data[idx + 1] = pixeles[i][2];
+    data[idx + 2] = pixeles[i][3];
+    data[idx + 3] = pixeles[i][4];
+  }
+}
+
+function ordenarPorFilas(data, ancho, alto, intensidad) {
+  const filasAfectadas = Math.max(1, Math.round(alto * intensidad * 0.6));
+  for (let i = 0; i < filasAfectadas; i++) {
+    const y = Math.floor(Math.random() * alto);
+    const largo = Math.max(6, Math.floor(ancho * intensidad * (0.4 + Math.random() * 0.6)));
+    const inicio = Math.floor(Math.random() * Math.max(1, ancho - largo));
+    ordenarSegmento(data, ancho, y, inicio, Math.min(ancho, inicio + largo), true);
+  }
+}
+
+function ordenarPorColumnas(data, ancho, alto, intensidad) {
+  const columnasAfectadas = Math.max(1, Math.round(ancho * intensidad * 0.5));
+  for (let i = 0; i < columnasAfectadas; i++) {
+    const x = Math.floor(Math.random() * ancho);
+    const largo = Math.max(6, Math.floor(alto * intensidad * (0.4 + Math.random() * 0.6)));
+    const inicio = Math.floor(Math.random() * Math.max(1, alto - largo));
+    ordenarSegmento(data, ancho, x, inicio, Math.min(alto, inicio + largo), false);
+  }
+}
+
+// El largo de la corrida de sorting escala con edaNorm (arousal).
+function aplicarPixelSorting(data, ancho, alto, edaNorm, g) {
+  const intensidad = clamp(edaNorm * g.sort, 0, 1);
+  if (intensidad < 0.03) return;
+
+  ordenarPorFilas(data, ancho, alto, intensidad);
+  if (g.sortEjes === "ambos") {
+    ordenarPorColumnas(data, ancho, alto, intensidad * 0.7);
+  }
+}
+
+// --- 2. bvp_std (variabilidad de pulso) → frame bleed ---------------
+// Mezcla el frame anterior sobre el actual. Un pequeño desplazamiento
+// horizontal del frame anterior simula un artefacto de compensación
+// de movimiento (el "fantasma" no queda perfectamente alineado).
+
+function ruidoPseudoAleatorio(tiempoMs, semilla) {
+  const paso = Math.floor(tiempoMs / 80);
+  const x = Math.sin(paso * 12.9898 + semilla * 78.233) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+function calcularOpacidadBleed(bvpStdNorm, g, tiempoMs) {
+  const base = bvpStdNorm * g.bleed;
+
+  if (g.bleedModo === "erratico") {
+    const ruido = ruidoPseudoAleatorio(tiempoMs, 1);
+    return clamp(base * (0.35 + ruido * 0.9), 0, 0.85);
+  }
+
+  if (g.bleedModo === "ritmico") {
+    const fase = (tiempoMs / 1000) * 0.6 * Math.PI * 2; // ritmo lento, ~0.6 Hz
+    const onda = 0.5 + 0.5 * Math.sin(fase);
+    return clamp(base * (0.4 + 0.6 * onda), 0, 0.85);
+  }
+
+  // "plano": casi sin modulación temporal, apenas respira.
+  return clamp(base * 0.3, 0, 0.85);
+}
+
+function aplicarFrameBleed(actual, anterior, ancho, alto, opacidad, g, tiempoMs) {
+  if (opacidad < 0.01 || !anterior) return;
+
+  let desplazamiento = Math.round(opacidad * 3);
+  if (g.bleedModo === "erratico" && ruidoPseudoAleatorio(tiempoMs, 2) > 0.5) {
+    desplazamiento *= -1;
+  }
+
+  for (let y = 0; y < alto; y++) {
+    for (let x = 0; x < ancho; x++) {
+      const idx = (y * ancho + x) * 4;
+      const xAnt = clamp(x - desplazamiento, 0, ancho - 1);
+      const idxAnt = (y * ancho + xAnt) * 4;
+
+      actual[idx] = actual[idx] * (1 - opacidad) + anterior[idxAnt] * opacidad;
+      actual[idx + 1] = actual[idx + 1] * (1 - opacidad) + anterior[idxAnt + 1] * opacidad;
+      actual[idx + 2] = actual[idx + 2] * (1 - opacidad) + anterior[idxAnt + 2] * opacidad;
+    }
+  }
+}
+
+// --- 3. temp_mean → aberración cromática (mapeo invertido) ----------
+// Temperatura baja (vasoconstricción / estrés) separa los canales
+// más. Temperatura alta los mantiene alineados. Por eso el offset
+// se calcula sobre (1 - tempNorm), no sobre tempNorm.
+
+const OFFSET_MAX_ABERRACION_PX = 16;
+
+function calcularOffsetAberracion(tempNorm, g) {
+  if (g.aberr === 0) return 0;
+  return (1 - tempNorm) * OFFSET_MAX_ABERRACION_PX * g.aberr;
+}
+
+function aplicarAberracionCromatica(data, ancho, alto, offsetPx) {
+  const desplazamiento = Math.round(offsetPx);
+  if (desplazamiento < 1) return;
+
+  const original = new Uint8ClampedArray(data);
+
+  for (let y = 0; y < alto; y++) {
+    for (let x = 0; x < ancho; x++) {
+      const idx = (y * ancho + x) * 4;
+      const idxR = (y * ancho + clamp(x - desplazamiento, 0, ancho - 1)) * 4;
+      const idxB = (y * ancho + clamp(x + desplazamiento, 0, ancho - 1)) * 4;
+
+      data[idx] = original[idxR];         // rojo, desplazado
+      data[idx + 2] = original[idxB + 2]; // azul, desplazado al lado contrario
+      // el verde queda en su lugar: ancla la imagen y hace legible el corte
+    }
+  }
+}
+
+// ======================================================
+// 06 — MOTOR DE REPRODUCCIÓN
+// ======================================================
+
+let reproduciendo = false;
+let tiempoInicioMs = 0;
+let tiempoAcumuladoMs = 0;
+let ultimoRecalculoMs = -Infinity;
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function evaluarSesionEnTiempo(transcurridoMs) {
+  const bloques = sesionActual.bloques;
+  if (bloques.length === 0) return null;
+
+  const duracionTotal = bloques.length * DURACION_BLOQUE_MS;
+  // % puede devolver negativo si transcurridoMs < 0 (posible en el primer
+  // frame tras dar play, por redondeo entre performance.now() y el
+  // timestamp de requestAnimationFrame). Se normaliza al rango positivo.
+  const t = ((transcurridoMs % duracionTotal) + duracionTotal) % duracionTotal;
+  const posicion = t / DURACION_BLOQUE_MS;
+
+  const i0 = Math.floor(posicion) % bloques.length;
+  const i1 = (i0 + 1) % bloques.length;
+  const frac = posicion - Math.floor(posicion);
+
+  const a = bloques[i0];
+  const b = bloques[i1];
+
+  return {
+    condicion: a.condicion,
+    edaNorm: lerp(a.edaNorm, b.edaNorm, frac),
+    bvpStdNorm: lerp(a.bvpStdNorm, b.bvpStdNorm, frac),
+    tempNorm: lerp(a.tempNorm, b.tempNorm, frac),
+  };
+}
+
+function aplicarCorrupcion(params, tiempoMs) {
+  if (!ctx || !pristinoData) return;
+
+  const g = gramaticaSegura(params.condicion);
+  const trabajo = new Uint8ClampedArray(pristinoData);
+
+  const offsetAberracion = calcularOffsetAberracion(params.tempNorm, g);
+  aplicarAberracionCromatica(trabajo, anchoLienzo, altoLienzo, offsetAberracion);
+
+  aplicarPixelSorting(trabajo, anchoLienzo, altoLienzo, params.edaNorm, g);
+
+  const opacidadBleed = calcularOpacidadBleed(params.bvpStdNorm, g, tiempoMs);
+  aplicarFrameBleed(trabajo, bufferAnterior, anchoLienzo, altoLienzo, opacidadBleed, g, tiempoMs);
+
+  bufferAnterior.set(trabajo);
+  imageDataSalida.data.set(trabajo);
+  ctx.putImageData(imageDataSalida, 0, 0);
+}
+
+function gramaticaSegura(condicion) {
+  return GRAMATICA[condicion] ?? GRAMATICA.baseline;
+}
+
+function dibujarFramePristino() {
+  if (!ctx || !pristinoData) return;
+  bufferAnterior.set(pristinoData);
+  imageDataSalida.data.set(pristinoData);
+  ctx.putImageData(imageDataSalida, 0, 0);
+  actualizarEtiquetaCondicion(null);
+}
+
+function actualizarEtiquetaCondicion(condicion) {
+  const etiqueta = document.querySelector("#condicion-label");
+  if (!condicion) {
+    etiqueta.textContent = "—";
+    etiqueta.dataset.condicion = "";
+    return;
+  }
+  etiqueta.textContent = nombresCondicion[condicion] ?? condicion;
+  etiqueta.dataset.condicion = condicion;
+}
+
+function pasoReproduccion(ahoraMs) {
+  if (!reproduciendo || sesionActual.bloques.length === 0) return;
+
+  const transcurrido = Math.max(0, tiempoAcumuladoMs + (ahoraMs - tiempoInicioMs));
+  const params = evaluarSesionEnTiempo(transcurrido);
+  if (!params) return;
+
+  actualizarEtiquetaCondicion(params.condicion);
+
+  if (ahoraMs - ultimoRecalculoMs >= INTERVALO_RECALCULO_MS) {
+    ultimoRecalculoMs = ahoraMs;
+    aplicarCorrupcion(params, transcurrido);
+  }
+}
+
+// ======================================================
+// 07 — IMAGEN FUENTE
+// ======================================================
+
+function cargarImagen(indice = 0) {
+  if (indice >= NOMBRES_IMAGEN.length) {
+    console.warn(
+      "No se encontró ninguna imagen en assets/images/. Usando silueta de referencia."
     );
-    const columnas = Math.ceil(Math.sqrt(bloquesCondicion.length)) || 1;
-    const offsetX = (indiceZona - 1) * separacionZonas;
+    prepararLienzoConPlaceholder();
+    return;
+  }
 
-    return bloquesCondicion.map((bloque, indice) => {
-      const columna = indice % columnas;
-      const fila = Math.floor(indice / columnas);
-      return {
-        ...bloque,
-        x: offsetX + (columna - columnas / 2) * separacionGrilla,
-        z: (fila - columnas / 2) * separacionGrilla,
-      };
-    });
-  });
+  const img = new Image();
+  img.onload = () => prepararLienzoConImagen(img);
+  img.onerror = () => cargarImagen(indice + 1);
+  img.src = `./assets/images/${NOMBRES_IMAGEN[indice]}`;
 }
 
-function generarRepresentacion() {
-  limpiarRepresentacion();
+function inicializarBuffers() {
+  const inicial = ctx.getImageData(0, 0, anchoLienzo, altoLienzo);
+  pristinoData = new Uint8ClampedArray(inicial.data);
+  bufferAnterior = new Uint8ClampedArray(inicial.data);
+  imageDataSalida = ctx.createImageData(anchoLienzo, altoLienzo);
+}
 
-  const sujetosAConstruir =
-    parametros.sujeto === "todos" ? sujetosOrdenados : [parametros.sujeto];
+function prepararLienzoConImagen(img) {
+  const escala = Math.min(1, ANCHO_MAX_LIENZO / img.width);
+  anchoLienzo = Math.round(img.width * escala);
+  altoLienzo = Math.round(img.height * escala);
 
-  const bloquesCrudos = sujetosAConstruir.flatMap((sujeto) =>
-    construirBloquesDeSujeto(sujeto, parametros.bucketsPorSujeto)
+  lienzo.width = anchoLienzo;
+  lienzo.height = altoLienzo;
+  ctx = lienzo.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, anchoLienzo, altoLienzo);
+
+  inicializarBuffers();
+  document.querySelector("#imagen-label").textContent = "imagen propia cargada";
+}
+
+function prepararLienzoConPlaceholder() {
+  anchoLienzo = 420;
+  altoLienzo = 520;
+
+  lienzo.width = anchoLienzo;
+  lienzo.height = altoLienzo;
+  ctx = lienzo.getContext("2d", { willReadFrequently: true });
+
+  const gradiente = ctx.createRadialGradient(
+    anchoLienzo / 2, altoLienzo * 0.38, 20,
+    anchoLienzo / 2, altoLienzo * 0.5, altoLienzo * 0.75
   );
+  gradiente.addColorStop(0, "#d8c9b8");
+  gradiente.addColorStop(0.55, "#8a7261");
+  gradiente.addColorStop(1, "#221c17");
+  ctx.fillStyle = gradiente;
+  ctx.fillRect(0, 0, anchoLienzo, altoLienzo);
 
-  const filtrados = aplicarFiltros(bloquesCrudos);
+  ctx.fillStyle = "rgba(20,16,14,0.85)";
+  ctx.beginPath();
+  ctx.ellipse(anchoLienzo / 2, altoLienzo * 0.34, anchoLienzo * 0.19, altoLienzo * 0.24, 0, 0, Math.PI * 2);
+  ctx.fill();
 
-  bloques =
-    parametros.modo === "temporal"
-      ? distribuirTemporalmente(filtrados)
-      : distribuirPorCondicion(filtrados);
+  ctx.beginPath();
+  ctx.moveTo(anchoLienzo * 0.26, altoLienzo * 0.98);
+  ctx.quadraticCurveTo(anchoLienzo * 0.5, altoLienzo * 0.55, anchoLienzo * 0.74, altoLienzo * 0.98);
+  ctx.closePath();
+  ctx.fill();
 
-  bloques.forEach(crearModuloBloque);
+  inicializarBuffers();
 
-  document.querySelector("#conteo-label").textContent =
-    `${sujetosAConstruir.length} sujeto(s) · ${bloques.length} bloques`;
-}
-
-function crearModuloBloque(bloque) {
-  // REGLA 1: EDA normalizado por sujeto → altura.
-  const altura = 0.4 + bloque.edaNorm * parametros.escalaAltura * 3;
-
-  // REGLA 2: variabilidad de BVP → ancho.
-  // bvpStd no está acotado de forma natural; usamos una compresión
-  // logarítmica suave para que valores atípicos no dominen el ancho.
-  const anchoBase = Math.log(1 + bloque.bvpStd) * 0.6;
-  const ancho = Math.max(0.35, Math.min(1.8, anchoBase)) * parametros.escalaAncho;
-
-  const geometria = new THREE.BoxGeometry(ancho, altura, ancho);
-  const material = new THREE.MeshStandardMaterial({
-    color: COLOR_CONDICION[bloque.condicion] ?? 0x888888,
-    roughness: 0.55,
-  });
-
-  const malla = new THREE.Mesh(geometria, material);
-  malla.position.set(bloque.x, altura / 2, bloque.z);
-  malla.castShadow = true;
-  malla.userData.bloque = bloque;
-
-  grupoBloques.add(malla);
-  objetosBloque.push(malla);
-}
-
-function limpiarRepresentacion() {
-  objetosBloque = [];
-
-  while (grupoBloques.children.length > 0) {
-    const objeto = grupoBloques.children[0];
-    if (objeto.geometry) objeto.geometry.dispose();
-    if (objeto.material) objeto.material.dispose();
-    grupoBloques.remove(objeto);
-  }
+  document.querySelector("#imagen-label").textContent = "silueta de referencia (falta assets/images/retrato.*)";
+  document.querySelector("#aviso-imagen").hidden = false;
 }
 
 // ======================================================
-// 05 — INTERFAZ + INSPECTOR
+// 08 — INTERFAZ
 // ======================================================
-
-const raycaster = new THREE.Raycaster();
-const puntero = new THREE.Vector2();
-
-renderer.domElement.addEventListener("pointerdown", (event) => {
-  const rect = renderer.domElement.getBoundingClientRect();
-
-  puntero.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  puntero.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-  raycaster.setFromCamera(puntero, camara);
-
-  const intersecciones = raycaster.intersectObjects(objetosBloque, false);
-
-  if (intersecciones.length > 0) {
-    mostrarBloque(intersecciones[0].object.userData.bloque);
-  }
-});
-
-const nombresCondicion = {
-  baseline: "Baseline",
-  stress: "Estrés",
-  amusement: "Diversión",
-};
-
-function mostrarBloque(bloque) {
-  document.querySelector("#bloque-nombre").textContent =
-    `${bloque.sujeto} · bloque temporal ${Math.round(bloque.posicionTemporal * 100)}%`;
-  document.querySelector("#m-sujeto").textContent = bloque.sujeto;
-  document.querySelector("#m-condicion").textContent =
-    nombresCondicion[bloque.condicion] ?? bloque.condicion;
-  document.querySelector("#m-eda").textContent = bloque.edaCrudo.toFixed(3);
-  document.querySelector("#m-bvp").textContent = bloque.bvpStd.toFixed(3);
-}
 
 document.querySelector("#filtro-sujeto").addEventListener("change", (event) => {
-  parametros.sujeto = event.target.value;
-  generarRepresentacion();
-});
-
-document.querySelector("#filtro-condicion").addEventListener("change", (event) => {
-  parametros.condicion = event.target.value;
-  generarRepresentacion();
-});
-
-document.querySelector("#modo-distribucion").addEventListener("change", (event) => {
-  parametros.modo = event.target.value;
-  generarRepresentacion();
-});
-
-conectarSlider("escala-altura", "escala-altura-valor", "escalaAltura", 2);
-conectarSlider("escala-ancho", "escala-ancho-valor", "escalaAncho", 2);
-conectarSlider("buckets", "buckets-valor", "bucketsPorSujeto", 0);
-
-function conectarSlider(idControl, idValor, parametro, decimales) {
-  const control = document.querySelector(`#${idControl}`);
-  const valor = document.querySelector(`#${idValor}`);
-
-  control.addEventListener("input", (event) => {
-    parametros[parametro] = Number(event.target.value);
-    valor.value = parametros[parametro].toFixed(decimales);
-    generarRepresentacion();
-  });
-}
-
-document.querySelector("#reconstruir").addEventListener("click", () => {
-  generarRepresentacion();
+  seleccionarSujeto(event.target.value);
 });
 
 document.querySelector("#reproducir").addEventListener("click", (event) => {
   reproduciendo = !reproduciendo;
-  event.target.textContent = reproduciendo
-    ? "Detener barrido"
-    : "Reproducir barrido temporal";
+
+  if (reproduciendo) {
+    tiempoInicioMs = performance.now();
+  } else {
+    tiempoAcumuladoMs += performance.now() - tiempoInicioMs;
+  }
+
+  event.target.textContent = reproduciendo ? "Pausar sesión" : "Reproducir sesión";
 });
 
-function actualizarEstadoConexion(tipo) {
+function actualizarEstadoDatos(tipo) {
   const estado = document.querySelector("#estado-label");
-
   if (tipo === "listo") {
     estado.innerHTML = '<i class="status-dot"></i> listo';
   } else if (tipo === "error") {
-    estado.textContent = "error de carga";
+    estado.textContent = "error cargando CSV";
   } else {
     estado.textContent = "cargando…";
   }
 }
 
 // ======================================================
-// 06 — BARRIDO TEMPORAL
-// ======================================================
-// No hay API en vivo detrás de este dataset, así que la variación
-// en el tiempo que pide el ejercicio se resuelve con una lectura
-// activa: un cursor recorre la sesión de cada sujeto simultáneamente,
-// como la aguja de un monitor, atenuando lo que queda fuera de foco.
-// Solo tiene efecto visual en el modo "temporal".
-
-function actualizarBarrido() {
-  if (!reproduciendo) return;
-
-  cursorTemporal = (cursorTemporal + 0.0025) % 1;
-
-  if (parametros.modo !== "temporal") return;
-
-  objetosBloque.forEach((malla) => {
-    const distancia = Math.abs(malla.userData.bloque.posicionTemporal - cursorTemporal);
-    const foco = Math.max(0.15, 1 - distancia * 6);
-    malla.material.opacity = foco;
-    malla.material.transparent = foco < 0.99;
-  });
-}
-
-// ======================================================
-// 07 — ANIMACIÓN + RESPONSIVE
+// 09 — BUCLE PRINCIPAL
 // ======================================================
 
-function animar() {
+function animar(ahoraMs) {
   requestAnimationFrame(animar);
-  controlesOrbita.update();
-  actualizarBarrido();
-  renderer.render(escena, camara);
+  pasoReproduccion(ahoraMs);
 }
 
-function ajustarVentana() {
-  const ancho = viewport.clientWidth;
-  const altura = viewport.clientHeight;
-
-  camara.aspect = ancho / altura;
-  camara.updateProjectionMatrix();
-  renderer.setSize(ancho, altura);
-}
-
-window.addEventListener("resize", ajustarVentana);
-
+cargarImagen();
 cargarDatos();
-animar();escena.add(luzPrincipal);
-
-const suelo = new THREE.Mesh(
-  new THREE.PlaneGeometry(90, 90),
-  new THREE.MeshStandardMaterial({ color: 0x101114, roughness: 1 })
-);
-suelo.rotation.x = -Math.PI / 2;
-suelo.position.y = -0.02;
-suelo.receiveShadow = true;
-escena.add(suelo);
-
-const grilla = new THREE.GridHelper(70, 70, 0x34383d, 0x1e2024);
-grilla.position.y = 0.001;
-escena.add(grilla);
-
-const grupoEstaciones = new THREE.Group();
-escena.add(grupoEstaciones);
-
-const grupoBaseGeografica = new THREE.Group();
-escena.add(grupoBaseGeografica);
-
-// ======================================================
-// 03 — DATOS: FETCH + FALLBACK
-// ======================================================
-
-async function cargarDatosVivos() {
-  actualizarEstadoConexion("conectando");
-
-  try {
-    // Dos fuentes del mismo sistema:
-    // 1) información espacial y capacidad
-    // 2) estado operativo actual
-    const [respuestaInfo, respuestaEstado] = await Promise.all([
-      fetch(URL_INFO, { cache: "no-store" }),
-      fetch(URL_ESTADO, { cache: "no-store" }),
-    ]);
-
-    if (!respuestaInfo.ok || !respuestaEstado.ok) {
-      throw new Error("La API respondió con un estado no válido.");
-    }
-
-    const info = await respuestaInfo.json();
-    const estado = await respuestaEstado.json();
-
-    estaciones = combinarFeedsGBFS(info, estado);
-    actualizarEstadoConexion("vivo");
-    document.querySelector("#fuente-label").textContent = "Citi Bike · GBFS";
-    document.querySelector("#actualizacion-label").textContent =
-      formatearHora(estado.last_updated);
-
-    generarRepresentacion();
-  } catch (error) {
-    console.warn("No fue posible usar el feed vivo. Se utilizará el dataset local.", error);
-    await cargarRespaldoLocal();
-  }
-}
-
-async function cargarRespaldoLocal() {
-  const respuesta = await fetch("./assets/data/movilidad-respaldo.json");
-  const datos = await respuesta.json();
-
-  estaciones = datos.estaciones;
-  actualizarEstadoConexion("respaldo");
-  document.querySelector("#fuente-label").textContent = "Dataset local · respaldo";
-  document.querySelector("#actualizacion-label").textContent = "archivo local";
-
-  generarRepresentacion();
-}
-
-function combinarFeedsGBFS(info, estado) {
-  // station_id es la llave que permite unir ambos feeds.
-  const estadosPorId = new Map(
-    estado.data.stations.map((estacion) => [estacion.station_id, estacion])
-  );
-
-  return info.data.stations
-    .map((estacionInfo) => {
-      const estacionEstado = estadosPorId.get(estacionInfo.station_id);
-      if (!estacionEstado) return null;
-
-      const capacidad = estacionInfo.capacity ?? 0;
-      const bicicletas = estacionEstado.num_bikes_available ?? 0;
-      const anclajesLibres = estacionEstado.num_docks_available ?? 0;
-
-      return {
-        id: estacionInfo.station_id,
-        nombre: estacionInfo.name,
-        lat: estacionInfo.lat,
-        lon: estacionInfo.lon,
-        capacidad,
-        bicicletas,
-        anclajes_libres: anclajesLibres,
-      };
-    })
-    .filter(Boolean)
-    .filter((estacion) => estacion.capacidad > 0);
-}
-
-// ======================================================
-// 04 — REGLAS: INPUT → RELACIÓN → OUTPUT
-// ======================================================
-
-function calcularOcupacion(estacion) {
-  return estacion.capacidad > 0
-    ? estacion.bicicletas / estacion.capacidad
-    : 0;
-}
-
-function proyectarGeograficamente(estacionesSeleccionadas) {
-  // No construimos un mapa cartográfico exacto.
-  // Para este LAB hacemos una proyección local simple:
-  // longitud → X, latitud → Z.
-  const latitudes = estacionesSeleccionadas.map((e) => e.lat);
-  const longitudes = estacionesSeleccionadas.map((e) => e.lon);
-
-  const latCentro = (Math.min(...latitudes) + Math.max(...latitudes)) / 2;
-  const lonCentro = (Math.min(...longitudes) + Math.max(...longitudes)) / 2;
-
-  return estacionesSeleccionadas.map((estacion) => ({
-    ...estacion,
-    x: (estacion.lon - lonCentro) * 150,
-    z: -(estacion.lat - latCentro) * 150,
-  }));
-}
-
-function ordenarPorOcupacion(estacionesSeleccionadas) {
-  const ordenadas = [...estacionesSeleccionadas].sort(
-    (a, b) => calcularOcupacion(b) - calcularOcupacion(a)
-  );
-
-  const columnas = Math.ceil(Math.sqrt(ordenadas.length));
-  const separacion = 2.0;
-
-  return ordenadas.map((estacion, indice) => {
-    const columna = indice % columnas;
-    const fila = Math.floor(indice / columnas);
-
-    return {
-      ...estacion,
-      x: (columna - columnas / 2) * separacion,
-      z: (fila - columnas / 2) * separacion,
-    };
-  });
-}
-
-function generarRepresentacion() {
-  limpiarRepresentacion();
-
-  const seleccion = seleccionarEstaciones(estaciones, parametros.cantidad);
-
-  const distribuidas =
-    parametros.modo === "geografico"
-      ? proyectarGeograficamente(seleccion)
-      : ordenarPorOcupacion(seleccion);
-
-  actualizarBaseGeografica(distribuidas);
-  distribuidas.forEach(crearModuloEstacion);
-}
-
-function seleccionarEstaciones(lista, cantidad) {
-  // Elegimos un conjunto estable y suficientemente representativo.
-  // Ordenar por capacidad evita que el subconjunto dependa del orden arbitrario del feed.
-  return [...lista]
-    .sort((a, b) => b.capacidad - a.capacidad)
-    .slice(0, cantidad);
-}
-
-function crearModuloEstacion(estacion) {
-  const ocupacion = calcularOcupacion(estacion);
-
-  // REGLA 1:
-  // capacidad total → altura total del contenedor.
-  const alturaTotal =
-    Math.max(1.4, estacion.capacidad * parametros.escalaAltura);
-
-  // REGLA 2:
-  // bicicletas disponibles → fracción llena.
-  const alturaBicicletas = Math.max(0.08, alturaTotal * ocupacion);
-
-  // REGLA 3:
-  // porcentaje de ocupación → ancho del módulo.
-  const ancho =
-    (0.55 + ocupacion * 0.75) *
-    parametros.escalaAncho;
-
-  const grupo = new THREE.Group();
-  grupo.position.set(estacion.x, 0, estacion.z);
-  grupo.userData.estacion = estacion;
-
-  // Contenedor: representa la capacidad total.
-  const geometriaCapacidad = new THREE.BoxGeometry(ancho, alturaTotal, ancho);
-  const materialCapacidad = new THREE.MeshStandardMaterial({
-    color: 0x34383e,
-    roughness: 0.9,
-    transparent: true,
-    opacity: 0.55,
-  });
-
-  const capacidad = new THREE.Mesh(geometriaCapacidad, materialCapacidad);
-  capacidad.position.y = alturaTotal / 2;
-  capacidad.userData.estacion = estacion;
-  grupo.add(capacidad);
-
-  // Volumen claro: representa las bicicletas actualmente disponibles.
-  const geometriaBicicletas = new THREE.BoxGeometry(
-    ancho * 0.72,
-    alturaBicicletas,
-    ancho * 0.72
-  );
-  const materialBicicletas = new THREE.MeshStandardMaterial({
-    color: 0xddd7ca,
-    roughness: 0.5,
-  });
-
-  const bicicletas = new THREE.Mesh(geometriaBicicletas, materialBicicletas);
-  bicicletas.position.y = alturaBicicletas / 2;
-  bicicletas.castShadow = true;
-  bicicletas.userData.estacion = estacion;
-  grupo.add(bicicletas);
-
-  grupoEstaciones.add(grupo);
-  objetosEstacion.push(capacidad, bicicletas);
-}
-
-function limpiarRepresentacion() {
-  objetosEstacion = [];
-
-  while (grupoEstaciones.children.length > 0) {
-    const grupo = grupoEstaciones.children[0];
-
-    grupo.traverse((objeto) => {
-      if (objeto.geometry) objeto.geometry.dispose();
-      if (objeto.material) objeto.material.dispose();
-    });
-
-    grupoEstaciones.remove(grupo);
-  }
-}
-
-function actualizarBaseGeografica(estacionesDistribuidas) {
-  limpiarBaseGeografica();
-  grupoBaseGeografica.visible = parametros.modo === "geografico";
-
-  if (!grupoBaseGeografica.visible || estacionesDistribuidas.length === 0) return;
-
-  const xs = estacionesDistribuidas.map((estacion) => estacion.x);
-  const zs = estacionesDistribuidas.map((estacion) => estacion.z);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minZ = Math.min(...zs);
-  const maxZ = Math.max(...zs);
-  const ancho = maxX - minX;
-  const profundidad = maxZ - minZ;
-  const largoFlecha = Math.max(4, Math.min(ancho, profundidad) * 0.28);
-  const xGuia = minX - 3.2;
-  const zInicio = maxZ;
-  const zFinal = zInicio - largoFlecha;
-
-  const materialGuia = new THREE.LineBasicMaterial({
-    color: 0xd9d2c3,
-    transparent: true,
-    opacity: 0.5,
-  });
-
-  const flecha = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(xGuia, 0.04, zInicio),
-      new THREE.Vector3(xGuia, 0.04, zFinal),
-    ]),
-    materialGuia
-  );
-
-  const cabeza = new THREE.Mesh(
-    new THREE.ConeGeometry(0.42, 1.1, 3),
-    new THREE.MeshBasicMaterial({
-      color: 0xd9d2c3,
-      transparent: true,
-      opacity: 0.55,
-    })
-  );
-  cabeza.rotation.x = Math.PI / 2;
-  cabeza.rotation.z = Math.PI;
-  cabeza.position.set(xGuia, 0.06, zFinal - 0.46);
-
-  grupoBaseGeografica.add(flecha, cabeza);
-  grupoBaseGeografica.add(crearEtiquetaSuelo("N", xGuia, zFinal - 1.45, 42));
-  grupoBaseGeografica.add(
-    crearEtiquetaSuelo("lon → / lat ↑", minX, maxZ + 1.9, 34)
-  );
-}
-
-function limpiarBaseGeografica() {
-  limpiarGrupo(grupoBaseGeografica);
-}
-
-function limpiarGrupo(grupo) {
-  while (grupo.children.length > 0) {
-    const objeto = grupo.children[0];
-
-    if (objeto.geometry) objeto.geometry.dispose();
-    if (objeto.material) {
-      if (objeto.material.map) objeto.material.map.dispose();
-      objeto.material.dispose();
-    }
-
-    grupo.remove(objeto);
-  }
-}
-
-function crearEtiquetaSuelo(texto, x, z, tamanoFuente) {
-  const canvas = document.createElement("canvas");
-  const contexto = canvas.getContext("2d");
-  canvas.width = 256;
-  canvas.height = 96;
-
-  contexto.fillStyle = "rgba(217, 210, 195, 0.72)";
-  contexto.font = `${tamanoFuente}px Roboto, Arial, sans-serif`;
-  contexto.textAlign = "center";
-  contexto.textBaseline = "middle";
-  contexto.fillText(texto, canvas.width / 2, canvas.height / 2);
-
-  const textura = new THREE.CanvasTexture(canvas);
-  const etiqueta = new THREE.Sprite(
-    new THREE.SpriteMaterial({
-      map: textura,
-      transparent: true,
-      depthWrite: false,
-    })
-  );
-  etiqueta.position.set(x, 0.18, z);
-  etiqueta.scale.set(5.4, 2.0, 1);
-
-  return etiqueta;
-}
-
-// ======================================================
-// 05 — INTERFAZ + INSPECTOR
-// ======================================================
-
-const raycaster = new THREE.Raycaster();
-const puntero = new THREE.Vector2();
-
-renderer.domElement.addEventListener("pointerdown", (event) => {
-  const rect = renderer.domElement.getBoundingClientRect();
-
-  puntero.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  puntero.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-  raycaster.setFromCamera(puntero, camara);
-
-  const intersecciones = raycaster.intersectObjects(objetosEstacion, false);
-
-  if (intersecciones.length > 0) {
-    mostrarEstacion(intersecciones[0].object.userData.estacion);
-  }
-});
-
-function mostrarEstacion(estacion) {
-  const ocupacion = calcularOcupacion(estacion);
-
-  document.querySelector("#estacion-nombre").textContent = estacion.nombre;
-  document.querySelector("#m-bicis").textContent = estacion.bicicletas;
-  document.querySelector("#m-libres").textContent = estacion.anclajes_libres;
-  document.querySelector("#m-capacidad").textContent = estacion.capacidad;
-  document.querySelector("#m-ocupacion").textContent =
-    `${Math.round(ocupacion * 100)}%`;
-}
-
-document.querySelector("#modo-distribucion").addEventListener("change", (event) => {
-  parametros.modo = event.target.value;
-  generarRepresentacion();
-});
-
-conectarSlider("escala-altura", "escala-altura-valor", "escalaAltura", 2);
-conectarSlider("escala-ancho", "escala-ancho-valor", "escalaAncho", 2);
-conectarSlider("cantidad", "cantidad-valor", "cantidad", 0);
-
-function conectarSlider(idControl, idValor, parametro, decimales) {
-  const control = document.querySelector(`#${idControl}`);
-  const valor = document.querySelector(`#${idValor}`);
-
-  control.addEventListener("input", (event) => {
-    parametros[parametro] = Number(event.target.value);
-    valor.value = parametros[parametro].toFixed(decimales);
-    generarRepresentacion();
-  });
-}
-
-document.querySelector("#actualizar").addEventListener("click", async () => {
-  segundosRestantes = INTERVALO_ACTUALIZACION;
-  await cargarDatosVivos();
-});
-
-document.querySelector("#pausar").addEventListener("click", (event) => {
-  actualizacionAutomatica = !actualizacionAutomatica;
-  event.target.textContent = actualizacionAutomatica
-    ? "Pausar auto"
-    : "Reanudar auto";
-
-  document.querySelector("#cuenta-regresiva").textContent =
-    actualizacionAutomatica ? `${segundosRestantes} s` : "pausada";
-});
-
-function actualizarEstadoConexion(tipo) {
-  const estado = document.querySelector("#estado-label");
-
-  if (tipo === "vivo") {
-    estado.innerHTML = '<i class="status-dot"></i> conectado';
-  } else if (tipo === "respaldo") {
-    estado.textContent = "respaldo local";
-  } else {
-    estado.textContent = "conectando…";
-  }
-}
-
-function formatearHora(timestamp) {
-  if (!timestamp) return new Date().toLocaleTimeString("es-CL");
-
-  // GBFS v2 usa epoch seconds.
-  const fecha = new Date(timestamp * 1000);
-
-  return fecha.toLocaleTimeString("es-CL", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-// ======================================================
-// 06 — POLLING RESPONSABLE
-// ======================================================
-// La app consulta periódicamente el feed para mantener visible la fuente viva.
-// El feed puede declarar un TTL mayor, por lo que algunas respuestas pueden repetirse.
-// El contador mantiene visible que el sistema está esperando la próxima actualización.
-
-setInterval(async () => {
-  if (!actualizacionAutomatica) return;
-
-  segundosRestantes -= 1;
-  document.querySelector("#cuenta-regresiva").textContent =
-    `${segundosRestantes} s`;
-
-  if (segundosRestantes <= 0) {
-    segundosRestantes = INTERVALO_ACTUALIZACION;
-    await cargarDatosVivos();
-  }
-}, 1000);
-
-// ======================================================
-// 07 — ANIMACIÓN + RESPONSIVE
-// ======================================================
-
-function animar() {
-  requestAnimationFrame(animar);
-  controlesOrbita.update();
-  renderer.render(escena, camara);
-}
-
-function ajustarVentana() {
-  const ancho = viewport.clientWidth;
-  const altura = viewport.clientHeight;
-
-  camara.aspect = ancho / altura;
-  camara.updateProjectionMatrix();
-  renderer.setSize(ancho, altura);
-}
-
-window.addEventListener("resize", ajustarVentana);
-
-cargarDatosVivos();
-animar();
+requestAnimationFrame(animar);
