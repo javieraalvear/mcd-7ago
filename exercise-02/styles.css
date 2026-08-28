@@ -21,8 +21,12 @@ h1{font-size:clamp(34px,4vw,56px);font-weight:300;letter-spacing:-.04em;margin-b
 .subtitle{max-width:560px;color:var(--text-soft);font-size:15px;line-height:1.5}
 #viewport{position:relative;display:flex;align-items:center;justify-content:center;max-width:100%;max-height:100%}
 #lienzo{display:block;max-width:min(78vw,640px);max-height:82vh;width:auto;height:auto;box-shadow:0 30px 80px rgba(0,0,0,.55);image-rendering:pixelated}
-.aviso-imagen{position:absolute;left:38px;bottom:52px;max-width:520px;color:var(--text-faint);font-size:11px;line-height:1.5}
-.aviso-imagen code{color:var(--text-soft)}
+/* #camara-video nunca se ve: solo alimenta píxeles al canvas. Se
+   mantiene fuera de pantalla (no display:none) para que el navegador
+   siga decodificando frames en segundo plano. */
+#camara-video{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden}
+.aviso-camara{position:absolute;left:38px;bottom:52px;max-width:520px;color:var(--text-faint);font-size:11px;line-height:1.5}
+.aviso-camara code{color:var(--text-soft)}
 .hint{position:absolute;left:38px;bottom:26px;color:var(--text-faint);font-size:11px}
 .controls-panel{height:100vh;height:100dvh;padding:25px 26px 18px;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
 .panel-header{padding-bottom:14px;border-bottom:1px solid var(--line)}
@@ -32,9 +36,6 @@ h1{font-size:clamp(34px,4vw,56px);font-weight:300;letter-spacing:-.04em;margin-b
 .status-row strong{color:var(--text-soft);font-weight:500;text-align:right}
 .status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--live);margin-right:4px;box-shadow:0 0 8px rgba(146,179,156,.4)}
 .control-group{padding:16px 0;border-bottom:1px solid var(--line)}
-.select-label{display:block;margin-bottom:12px}
-.select-label span{display:block;margin-bottom:7px;color:var(--text-soft);font-size:12px}
-select{width:100%;padding:9px 10px;background:var(--panel-2);color:var(--text);border:1px solid var(--line);font:inherit;font-size:12px}
 button{display:block;width:100%;border:1px solid var(--accent);background:var(--accent);color:#111;padding:11px;font:inherit;font-size:11px;font-weight:600;letter-spacing:.02em;cursor:pointer}
 .condicion-card{padding:18px 0;border-bottom:1px solid var(--line)}
 .condicion-eyebrow{display:block;color:var(--text-faint);font-size:10px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;margin-bottom:8px}
@@ -49,6 +50,8 @@ button{display:block;width:100%;border:1px solid var(--accent);background:var(--
 .map-row b{font-weight:500;color:var(--text-soft)}
 .map-row span{color:var(--text-faint);text-align:center}
 .map-row em{font-style:normal;color:var(--text)}
+.lectura-valor{font-variant-numeric:tabular-nums;color:var(--live)}
+.lectura-viva .condicion-nota{margin-top:12px}
 @media(max-height:820px) and (min-width:901px){
   .controls-panel{padding-top:16px}
   .panel-header{padding-bottom:10px}

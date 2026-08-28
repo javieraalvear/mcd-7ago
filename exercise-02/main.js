@@ -7,11 +7,21 @@
 // etiquetadas con la condición dominante en esa ventana.
 //
 // Este ejercicio no grafica esos datos: los usa para corromper en
-// vivo una imagen real sobre un <canvas> 2D. La distorsión ES la
-// visualización — no hay barras, ejes ni leyendas de color.
+// vivo, sobre un <canvas> 2D, la cámara del espectador. La fuente
+// visual no es una foto externa ni un archivo: es el presente de
+// quien está mirando la pantalla, espejado como en un espejo real.
+// La reacción biométrica que decide la distorsión pertenece a un
+// sujeto de WESAD, grabado en otro cuerpo, en otro momento — el
+// teléfono descompuesto se vuelve literal: uno se ve a sí mismo
+// mediado por el cuerpo de otro.
 
 const RUTA_CSV = "./assets/data/wesad_light.csv";
-const NOMBRES_IMAGEN = ["retrato.jpg", "retrato.jpeg", "retrato.png"];
+
+// Un solo cuerpo ajeno, no una lista para elegir: la pieza no es un
+// comparador de sujetos, es "la respuesta de otra persona" mediando
+// la imagen propia. SUJETO_FIJO filtra ese único cuerpo dentro del
+// mismo CSV (columna `subject`) — no hay una segunda base de datos.
+const SUJETO_FIJO = "S2";
 
 const ANCHO_MAX_LIENZO = 520;
 const BLOQUES_POR_SESION = 60;      // resolución temporal de la sesión
@@ -62,12 +72,21 @@ const GRAMATICA = {
 // ======================================================
 
 const lienzo = document.querySelector("#lienzo");
+const video = document.querySelector("#camara-video");
 let ctx = null;
 let anchoLienzo = 0;
 let altoLienzo = 0;
 
-let pristinoData = null;   // ImageData original, nunca se modifica
-let bufferAnterior = null; // salida del frame anterior (para el frame bleed)
+// Lienzo auxiliar, nunca agregado al DOM: solo sirve para leer un
+// frame fresco de <video> (espejado) como ImageData en cada ciclo.
+const lienzoCaptura = document.createElement("canvas");
+let ctxCaptura = null;
+
+let fuenteLista = false; // cámara activa, o silueta de referencia lista
+let modoCamara = false;  // true = la fuente es video en vivo
+
+let pristinoEstatico = null; // solo se usa en modo silueta (sin cámara)
+let bufferAnterior = null;   // salida del frame anterior (para el frame bleed)
 let imageDataSalida = null;
 
 // ======================================================
@@ -75,7 +94,6 @@ let imageDataSalida = null;
 // ======================================================
 
 let filas = [];
-let sujetosOrdenados = [];
 let sesionActual = { sujeto: null, bloques: [] };
 
 async function cargarDatos() {
@@ -88,14 +106,10 @@ async function cargarDatos() {
     const texto = await respuesta.text();
     filas = parsearCSV(texto);
 
-    sujetosOrdenados = [...new Set(filas.map((fila) => fila.subject))].sort(
-      (a, b) => Number(a.slice(1)) - Number(b.slice(1))
-    );
-
-    poblarSelectorSujetos();
     actualizarEstadoDatos("listo");
+    document.querySelector("#sujeto-label").textContent = SUJETO_FIJO;
 
-    seleccionarSujeto(sujetosOrdenados[0]);
+    seleccionarSujeto(SUJETO_FIJO);
   } catch (error) {
     console.error("No fue posible cargar wesad_light.csv", error);
     actualizarEstadoDatos("error");
@@ -115,16 +129,6 @@ function parsearCSV(texto) {
         clave === "subject" || clave === "condition" ? valor : Number(valor);
     });
     return fila;
-  });
-}
-
-function poblarSelectorSujetos() {
-  const selector = document.querySelector("#filtro-sujeto");
-  sujetosOrdenados.forEach((sujeto) => {
-    const opcion = document.createElement("option");
-    opcion.value = sujeto;
-    opcion.textContent = sujeto;
-    selector.appendChild(opcion);
   });
 }
 
@@ -234,11 +238,12 @@ function seleccionarSujeto(sujeto) {
   sesionActual = { sujeto, bloques: normalizarSesion(crudos) };
 
   tiempoAcumuladoMs = 0;
-  reproduciendo = false;
-  document.querySelector("#reproducir").textContent = "Reproducir sesión";
-  document.querySelector("#filtro-sujeto").value = sujeto;
 
-  dibujarFramePristino();
+  // La pieza no es un dashboard que espera un click: apenas hay una
+  // sesión y una fuente (cámara o silueta), la corrupción arranca
+  // sola y no se detiene — "todo el tiempo interpretando la imagen
+  // con conceptos". El botón queda solo para pausar si se quiere.
+  iniciarReproduccion();
 }
 
 // ======================================================
@@ -307,8 +312,11 @@ function ordenarPorColumnas(data, ancho, alto, intensidad) {
 }
 
 // El largo de la corrida de sorting escala con edaNorm (arousal).
-function aplicarPixelSorting(data, ancho, alto, edaNorm, g) {
-  const intensidad = clamp(edaNorm * g.sort, 0, 1);
+function calcularIntensidadSorting(edaNorm, g) {
+  return clamp(edaNorm * g.sort, 0, 1);
+}
+
+function aplicarPixelSorting(data, ancho, alto, intensidad, g) {
   if (intensidad < 0.03) return;
 
   ordenarPorFilas(data, ancho, alto, intensidad);
@@ -411,6 +419,25 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
+// La pieza corre sola: apenas hay fuente (cámara o silueta) y una
+// sesión de sujeto cargada, la corrupción arranca y no se detiene
+// hasta que alguien pausa a mano. No hay un estado "esperando click".
+function iniciarReproduccion() {
+  if (!fuenteLista || sesionActual.bloques.length === 0) return;
+
+  reproduciendo = true;
+  tiempoInicioMs = performance.now();
+  document.querySelector("#reproducir").textContent = "Pausar sesión";
+}
+
+function pausarReproduccion() {
+  if (!reproduciendo) return;
+
+  tiempoAcumuladoMs += performance.now() - tiempoInicioMs;
+  reproduciendo = false;
+  document.querySelector("#reproducir").textContent = "Reproducir sesión";
+}
+
 function evaluarSesionEnTiempo(transcurridoMs) {
   const bloques = sesionActual.bloques;
   if (bloques.length === 0) return null;
@@ -437,16 +464,31 @@ function evaluarSesionEnTiempo(transcurridoMs) {
   };
 }
 
+// Dibuja el frame actual de <video>, espejado horizontalmente (como
+// un espejo real), en el lienzo de captura oculto, y devuelve sus
+// píxeles. Se llama una vez por ciclo de recálculo: cada corrupción
+// parte de un instante nuevo del presente de quien mira, no de una
+// imagen fija.
+function capturarFrameCamara() {
+  ctxCaptura.save();
+  ctxCaptura.translate(anchoLienzo, 0);
+  ctxCaptura.scale(-1, 1);
+  ctxCaptura.drawImage(video, 0, 0, anchoLienzo, altoLienzo);
+  ctxCaptura.restore();
+  return new Uint8ClampedArray(ctxCaptura.getImageData(0, 0, anchoLienzo, altoLienzo).data);
+}
+
 function aplicarCorrupcion(params, tiempoMs) {
-  if (!ctx || !pristinoData) return;
+  if (!ctx || !fuenteLista) return;
 
   const g = gramaticaSegura(params.condicion);
-  const trabajo = new Uint8ClampedArray(pristinoData);
+  const trabajo = modoCamara ? capturarFrameCamara() : new Uint8ClampedArray(pristinoEstatico);
 
   const offsetAberracion = calcularOffsetAberracion(params.tempNorm, g);
   aplicarAberracionCromatica(trabajo, anchoLienzo, altoLienzo, offsetAberracion);
 
-  aplicarPixelSorting(trabajo, anchoLienzo, altoLienzo, params.edaNorm, g);
+  const intensidadSorting = calcularIntensidadSorting(params.edaNorm, g);
+  aplicarPixelSorting(trabajo, anchoLienzo, altoLienzo, intensidadSorting, g);
 
   const opacidadBleed = calcularOpacidadBleed(params.bvpStdNorm, g, tiempoMs);
   aplicarFrameBleed(trabajo, bufferAnterior, anchoLienzo, altoLienzo, opacidadBleed, g, tiempoMs);
@@ -454,18 +496,36 @@ function aplicarCorrupcion(params, tiempoMs) {
   bufferAnterior.set(trabajo);
   imageDataSalida.data.set(trabajo);
   ctx.putImageData(imageDataSalida, 0, 0);
+
+  // Esto es el cruce hecho visible: el número crudo del sujeto WESAD,
+  // al lado del número que efectivamente se aplicó sobre tu cámara.
+  actualizarLecturaEnVivo(params, { offsetAberracion, intensidadSorting, opacidadBleed });
 }
 
 function gramaticaSegura(condicion) {
   return GRAMATICA[condicion] ?? GRAMATICA.baseline;
 }
 
-function dibujarFramePristino() {
-  if (!ctx || !pristinoData) return;
-  bufferAnterior.set(pristinoData);
-  imageDataSalida.data.set(pristinoData);
-  ctx.putImageData(imageDataSalida, 0, 0);
+// Estado de reposo: sin sesión reproduciéndose, el lienzo es un
+// espejo limpio (o, sin cámara, la silueta de referencia quieta).
+// Ninguna técnica de glitch corre aquí — solo entran cuando hay una
+// sesión biométrica activa.
+function dibujarFrameIdle() {
+  if (!ctx || !fuenteLista) return;
+
+  if (modoCamara) {
+    ctx.save();
+    ctx.translate(anchoLienzo, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0, anchoLienzo, altoLienzo);
+    ctx.restore();
+  } else {
+    imageDataSalida.data.set(pristinoEstatico);
+    ctx.putImageData(imageDataSalida, 0, 0);
+  }
+
   actualizarEtiquetaCondicion(null);
+  limpiarLecturaEnVivo();
 }
 
 function actualizarEtiquetaCondicion(condicion) {
@@ -477,6 +537,31 @@ function actualizarEtiquetaCondicion(condicion) {
   }
   etiqueta.textContent = nombresCondicion[condicion] ?? condicion;
   etiqueta.dataset.condicion = condicion;
+}
+
+// El cruce dato → técnica, en números, actualizado en cada ciclo de
+// recálculo (no cada frame): el dato crudo normalizado del sujeto al
+// lado de lo que esa técnica efectivamente le hizo a tu cámara.
+function actualizarLecturaEnVivo(params, tecnicas) {
+  document.querySelector("#lectura-eda-valor").textContent = params.edaNorm.toFixed(2);
+  document.querySelector("#lectura-eda-tecnica").textContent =
+    `${Math.round(tecnicas.intensidadSorting * 100)}% corrida`;
+
+  document.querySelector("#lectura-bvp-valor").textContent = params.bvpStdNorm.toFixed(2);
+  document.querySelector("#lectura-bvp-tecnica").textContent =
+    `${Math.round(tecnicas.opacidadBleed * 100)}% opacidad`;
+
+  document.querySelector("#lectura-temp-valor").textContent = params.tempNorm.toFixed(2);
+  document.querySelector("#lectura-temp-tecnica").textContent =
+    `${tecnicas.offsetAberracion.toFixed(1)} px`;
+}
+
+function limpiarLecturaEnVivo() {
+  ["#lectura-eda-valor", "#lectura-eda-tecnica",
+   "#lectura-bvp-valor", "#lectura-bvp-tecnica",
+   "#lectura-temp-valor", "#lectura-temp-tecnica"].forEach((selector) => {
+    document.querySelector(selector).textContent = "—";
+  });
 }
 
 function pasoReproduccion(ahoraMs) {
@@ -495,43 +580,65 @@ function pasoReproduccion(ahoraMs) {
 }
 
 // ======================================================
-// 07 — IMAGEN FUENTE
+// 07 — CÁMARA: LA FUENTE ES EL PRESENTE DE QUIEN MIRA
 // ======================================================
+// No hay imagen de stock ni foto propia estática que cargar: la
+// fuente es getUserMedia(), el reflejo en vivo del espectador. Si no
+// hay permiso o no hay cámara disponible, se cae a una silueta de
+// referencia generada por código — el mismo rol que cumplía antes el
+// placeholder cuando faltaba la foto, ahora como respaldo, no como
+// caso principal.
 
-function cargarImagen(indice = 0) {
-  if (indice >= NOMBRES_IMAGEN.length) {
-    console.warn(
-      "No se encontró ninguna imagen en assets/images/. Usando silueta de referencia."
-    );
+async function iniciarCamara() {
+  document.querySelector("#camara-label").textContent = "pidiendo permiso…";
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false,
+    });
+
+    video.srcObject = stream;
+    await video.play();
+
+    if (video.videoWidth === 0) {
+      await new Promise((resolve) => video.addEventListener("loadedmetadata", resolve, { once: true }));
+    }
+
+    prepararLienzoConCamara();
+  } catch (error) {
+    console.warn("No fue posible acceder a la cámara. Usando silueta de referencia.", error);
     prepararLienzoConPlaceholder();
-    return;
   }
-
-  const img = new Image();
-  img.onload = () => prepararLienzoConImagen(img);
-  img.onerror = () => cargarImagen(indice + 1);
-  img.src = `./assets/images/${NOMBRES_IMAGEN[indice]}`;
 }
 
-function inicializarBuffers() {
-  const inicial = ctx.getImageData(0, 0, anchoLienzo, altoLienzo);
-  pristinoData = new Uint8ClampedArray(inicial.data);
-  bufferAnterior = new Uint8ClampedArray(inicial.data);
+function inicializarBuffersDesde(imageData) {
+  bufferAnterior = new Uint8ClampedArray(imageData.data);
   imageDataSalida = ctx.createImageData(anchoLienzo, altoLienzo);
 }
 
-function prepararLienzoConImagen(img) {
-  const escala = Math.min(1, ANCHO_MAX_LIENZO / img.width);
-  anchoLienzo = Math.round(img.width * escala);
-  altoLienzo = Math.round(img.height * escala);
+function prepararLienzoConCamara() {
+  const escala = Math.min(1, ANCHO_MAX_LIENZO / video.videoWidth);
+  anchoLienzo = Math.round(video.videoWidth * escala);
+  altoLienzo = Math.round(video.videoHeight * escala);
 
   lienzo.width = anchoLienzo;
   lienzo.height = altoLienzo;
   ctx = lienzo.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(img, 0, 0, anchoLienzo, altoLienzo);
 
-  inicializarBuffers();
-  document.querySelector("#imagen-label").textContent = "imagen propia cargada";
+  lienzoCaptura.width = anchoLienzo;
+  lienzoCaptura.height = altoLienzo;
+  ctxCaptura = lienzoCaptura.getContext("2d", { willReadFrequently: true });
+
+  modoCamara = true;
+  const primerFrame = capturarFrameCamara();
+  bufferAnterior = new Uint8ClampedArray(primerFrame);
+  imageDataSalida = ctx.createImageData(anchoLienzo, altoLienzo);
+
+  fuenteLista = true;
+  document.querySelector("#camara-label").textContent = "cámara activa";
+  dibujarFrameIdle();
+  iniciarReproduccion();
 }
 
 function prepararLienzoConPlaceholder() {
@@ -563,30 +670,28 @@ function prepararLienzoConPlaceholder() {
   ctx.closePath();
   ctx.fill();
 
-  inicializarBuffers();
+  modoCamara = false;
+  const inicial = ctx.getImageData(0, 0, anchoLienzo, altoLienzo);
+  pristinoEstatico = new Uint8ClampedArray(inicial.data);
+  inicializarBuffersDesde(inicial);
 
-  document.querySelector("#imagen-label").textContent = "silueta de referencia (falta assets/images/retrato.*)";
-  document.querySelector("#aviso-imagen").hidden = false;
+  fuenteLista = true;
+  document.querySelector("#camara-label").textContent = "sin cámara (silueta de referencia)";
+  document.querySelector("#aviso-camara").hidden = false;
+  dibujarFrameIdle();
+  iniciarReproduccion();
 }
 
 // ======================================================
 // 08 — INTERFAZ
 // ======================================================
 
-document.querySelector("#filtro-sujeto").addEventListener("change", (event) => {
-  seleccionarSujeto(event.target.value);
-});
-
-document.querySelector("#reproducir").addEventListener("click", (event) => {
-  reproduciendo = !reproduciendo;
-
+document.querySelector("#reproducir").addEventListener("click", () => {
   if (reproduciendo) {
-    tiempoInicioMs = performance.now();
+    pausarReproduccion();
   } else {
-    tiempoAcumuladoMs += performance.now() - tiempoInicioMs;
+    iniciarReproduccion();
   }
-
-  event.target.textContent = reproduciendo ? "Pausar sesión" : "Reproducir sesión";
 });
 
 function actualizarEstadoDatos(tipo) {
@@ -606,9 +711,17 @@ function actualizarEstadoDatos(tipo) {
 
 function animar(ahoraMs) {
   requestAnimationFrame(animar);
-  pasoReproduccion(ahoraMs);
+  if (!fuenteLista) return;
+
+  if (reproduciendo && sesionActual.bloques.length > 0) {
+    pasoReproduccion(ahoraMs);
+  } else if (modoCamara) {
+    // Sin sesión activa el espejo se mantiene vivo: solo se corrompe
+    // mientras corre la biometría de otro cuerpo sobre el propio.
+    dibujarFrameIdle();
+  }
 }
 
-cargarImagen();
+iniciarCamara();
 cargarDatos();
 requestAnimationFrame(animar);
