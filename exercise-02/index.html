@@ -17,14 +17,15 @@
 
       <div id="viewport">
         <canvas id="lienzo"></canvas>
-        <video id="video-fuente" autoplay playsinline muted></video>
+        <video id="video-fuente" autoplay playsinline muted style="display:none"></video>
       </div>
 
-      <div class="legend">
-        <span><i class="dot" style="background:#7c8b99"></i>Baseline</span>
-        <span><i class="dot" style="background:#c1443b"></i>Estrés</span>
-        <span><i class="dot" style="background:#d9a441"></i>Diversión</span>
-      </div>
+      <p class="aviso-imagen">
+        La imagen es tu cámara en vivo, procesada localmente en tu navegador.
+        No se graba ni se envía a ningún servidor. Fuente de los datos que
+        deforman la imagen: <code>wesad_light.csv</code>, derivado de
+        Schmidt et al. (2018), WESAD.
+      </p>
 
       <div class="hint" id="mensaje-camara">Solicitando acceso a la cámara…</div>
     </section>
@@ -41,13 +42,15 @@
           <strong id="fuente-label">Cargando…</strong>
         </div>
         <div class="status-row">
-          <span>Condición activa</span>
-          <strong id="condicion-label">—</strong>
-        </div>
-        <div class="status-row">
           <span>Progreso de sesión</span>
           <strong id="progreso-label">—</strong>
         </div>
+      </section>
+
+      <section class="condicion-card">
+        <span class="condicion-eyebrow">Condición activa</span>
+        <strong id="condicion-label" data-condicion="">—</strong>
+        <p class="condicion-nota" id="condicion-nota">Presiona "Iniciar sesión" para reproducir la biometría de este sujeto sobre tu propio reflejo.</p>
       </section>
 
       <section class="control-group">
@@ -62,6 +65,20 @@
         <h3>Reglas de corrupción</h3>
         <div class="map-row"><b>EDA (arousal)</b><span>→</span><em>pixel sorting</em></div>
         <div class="map-row"><b>variabilidad de BVP</b><span>→</span><em>frame bleed</em></div>
+        <div class="map-row"><b>temperatura (invertida)</b><span>→</span><em>aberración cromática</em></div>
+        <div class="map-row"><b>condición</b><span>→</span><em>gramática de combinación</em></div>
+      </section>
+
+      <div class="actions">
+        <button id="reproducir">Iniciar sesión</button>
+        <button id="reiniciar">Reiniciar</button>
+      </div>
+    </aside>
+  </main>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>        <div class="map-row"><b>variabilidad de BVP</b><span>→</span><em>frame bleed</em></div>
         <div class="map-row"><b>temperatura (invertida)</b><span>→</span><em>aberración cromática</em></div>
         <div class="map-row"><b>condición</b><span>→</span><em>gramática de combinación</em></div>
       </section>
