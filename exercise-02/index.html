@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Campo de Datos 01 · Corrupción biométrica</title>
+  <title>Cadena de observadores · Biometría WESAD</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -11,66 +11,65 @@
     <section class="viewport-shell">
       <header class="project-header">
         <p class="eyebrow">COMPUTACIÓN AVANZADA · MCD UAI</p>
-        <h1>La imagen es el dato</h1>
-        <p class="subtitle">WESAD: EDA, variabilidad de pulso y temperatura de muñeca de un sujeto corrompen en vivo una fotografía, canal por canal, técnica por técnica. No hay gráfico: la distorsión es la visualización.</p>
+        <h1>Cadena de observadores</h1>
+        <p class="subtitle">Tu reflejo en vivo, corrompido por la reacción biométrica involuntaria de un sujeto de WESAD durante estrés, diversión o reposo.</p>
       </header>
 
       <div id="viewport">
         <canvas id="lienzo"></canvas>
+        <video id="video-fuente" autoplay playsinline muted></video>
       </div>
 
-      <p id="aviso-imagen" class="aviso-imagen" hidden>
-        No se encontró una imagen en <code>assets/images/</code> (retrato.jpg / .jpeg / .png). Mostrando una silueta de referencia generada por código.
-      </p>
+      <div class="legend">
+        <span><i class="dot" style="background:#7c8b99"></i>Baseline</span>
+        <span><i class="dot" style="background:#c1443b"></i>Estrés</span>
+        <span><i class="dot" style="background:#d9a441"></i>Diversión</span>
+      </div>
 
-      <div class="hint">Selecciona un sujeto y reproduce su sesión completa</div>
+      <div class="hint" id="mensaje-camara">Solicitando acceso a la cámara…</div>
     </section>
 
     <aside class="controls-panel">
       <div class="panel-header">
-        <p class="eyebrow">FUENTE + REPRODUCCIÓN</p>
-        <h2>Dataset propio</h2>
+        <p class="eyebrow">FUENTE + REPRESENTACIÓN</p>
+        <h2>Dataset propio · WESAD</h2>
       </div>
 
       <section class="status-card">
         <div class="status-row">
-          <span>CSV</span>
-          <strong id="estado-label"><i class="status-dot"></i> cargando</strong>
+          <span>Fuente biométrica</span>
+          <strong id="fuente-label">Cargando…</strong>
         </div>
         <div class="status-row">
-          <span>Imagen</span>
-          <strong id="imagen-label">cargando…</strong>
+          <span>Condición activa</span>
+          <strong id="condicion-label">—</strong>
+        </div>
+        <div class="status-row">
+          <span>Progreso de sesión</span>
+          <strong id="progreso-label">—</strong>
         </div>
       </section>
 
       <section class="control-group">
+        <h3>Sesión a reproducir</h3>
         <label class="select-label">
           <span>Sujeto</span>
           <select id="filtro-sujeto"></select>
         </label>
-
-        <button id="reproducir">Reproducir sesión</button>
-      </section>
-
-      <section class="condicion-card">
-        <span class="condicion-eyebrow">Condición activa</span>
-        <strong id="condicion-label" data-condicion="">—</strong>
-        <p class="condicion-nota">Solo para verificar durante el desarrollo — no es una leyenda de color: baseline, estrés y diversión se distinguen por qué combinación de técnicas se activa, no por un tono.</p>
       </section>
 
       <section class="mapping">
-        <h3>Mapeos (uno por variable)</h3>
-        <div class="map-row"><b>EDA norm. por sujeto</b><span>→</span><em>pixel sorting</em></div>
+        <h3>Reglas de corrupción</h3>
+        <div class="map-row"><b>EDA (arousal)</b><span>→</span><em>pixel sorting</em></div>
         <div class="map-row"><b>variabilidad de BVP</b><span>→</span><em>frame bleed</em></div>
-        <div class="map-row"><b>temp_mean (invertido)</b><span>→</span><em>aberración cromática</em></div>
+        <div class="map-row"><b>temperatura (invertida)</b><span>→</span><em>aberración cromática</em></div>
+        <div class="map-row"><b>condición</b><span>→</span><em>gramática de combinación</em></div>
       </section>
 
-      <section class="mapping">
-        <h3>Gramática por condición</h3>
-        <div class="map-row"><b>baseline</b><span>→</span><em>las tres técnicas casi apagadas</em></div>
-        <div class="map-row"><b>estrés</b><span>→</span><em>sorting agresivo + aberración marcada + bleed errático</em></div>
-        <div class="map-row"><b>diversión</b><span>→</span><em>bleed rítmico, sorting leve, sin aberración</em></div>
-      </section>
+      <div class="actions">
+        <button id="reproducir">Iniciar sesión</button>
+        <button id="reiniciar" class="secondary">Reiniciar</button>
+      </div>
     </aside>
   </main>
 
