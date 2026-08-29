@@ -589,28 +589,88 @@ function pasoReproduccion(ahoraMs) {
 // placeholder cuando faltaba la foto, ahora como respaldo, no como
 // caso principal.
 
+let streamCamara = null;
+
+// Mensajes específicos por causa real, no un "no se pudo" genérico —
+// para poder diagnosticar sin abrir la consola. `error.name` es el
+// nombre estándar que la API de MediaDevices usa para cada falla.
+const MENSAJES_ERROR_CAMARA = {
+  "contexto-inseguro":
+    "Esta página no está en un contexto seguro. Ábrela con Live Server (http://localhost) — no funciona abriendo el archivo directamente (file://).",
+  NotAllowedError:
+    "Permiso de cámara denegado. Revisa el ícono de cámara en la barra de direcciones (o los permisos del sitio) y reintenta.",
+  NotFoundError: "No se encontró ninguna cámara conectada a este dispositivo.",
+  NotReadableError:
+    "La cámara está siendo usada por otra pestaña, ventana o aplicación (Zoom, Meet, otra pestaña con esta misma página...). Ciérrala y reintenta.",
+  OverconstrainedError: "La cámara no soporta la resolución pedida.",
+  AbortError: "El acceso a la cámara se interrumpió antes de completarse.",
+  SecurityError: "El navegador bloqueó el acceso a la cámara por política de seguridad.",
+  Timeout: "La cámara concedió permiso pero nunca entregó una imagen (tardó más de 8s). Puede estar ocupada por otra app.",
+  desconocido: "No fue posible acceder a la cámara.",
+};
+
+function esperarConTimeout(promesa, ms) {
+  return Promise.race([
+    promesa,
+    new Promise((_, reject) => {
+      const error = new Error("timeout");
+      error.name = "Timeout";
+      setTimeout(() => reject(error), ms);
+    }),
+  ]);
+}
+
 async function iniciarCamara() {
+  document.querySelector("#reintentar-camara").hidden = true;
+  document.querySelector("#aviso-camara").hidden = true;
   document.querySelector("#camara-label").textContent = "pidiendo permiso…";
 
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    console.warn("getUserMedia no disponible: la página no corre en un contexto seguro.");
+    prepararLienzoConPlaceholder("contexto-inseguro");
+    return;
+  }
+
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
+    streamCamara = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
       audio: false,
     });
 
-    video.srcObject = stream;
-    await video.play();
+    video.srcObject = streamCamara;
+    await esperarConTimeout(video.play(), 8000);
 
     if (video.videoWidth === 0) {
-      await new Promise((resolve) => video.addEventListener("loadedmetadata", resolve, { once: true }));
+      await esperarConTimeout(
+        new Promise((resolve) => video.addEventListener("loadedmetadata", resolve, { once: true })),
+        8000
+      );
     }
 
     prepararLienzoConCamara();
   } catch (error) {
     console.warn("No fue posible acceder a la cámara. Usando silueta de referencia.", error);
-    prepararLienzoConPlaceholder();
+    detenerCamara();
+    prepararLienzoConPlaceholder(error.name);
   }
 }
+
+function detenerCamara() {
+  if (streamCamara) {
+    streamCamara.getTracks().forEach((track) => track.stop());
+    streamCamara = null;
+  }
+}
+
+// Si se deja la cámara abierta al recargar o navegar a otra página del
+// mismo ejercicio (datos.html), el sistema operativo puede seguir
+// reportándola "en uso" en la siguiente carga — de ahí NotReadableError
+// en un reintento que debería funcionar.
+window.addEventListener("pagehide", detenerCamara);
+
+document.querySelector("#reintentar-camara").addEventListener("click", () => {
+  iniciarCamara();
+});
 
 function inicializarBuffersDesde(imageData) {
   bufferAnterior = new Uint8ClampedArray(imageData.data);
@@ -641,7 +701,7 @@ function prepararLienzoConCamara() {
   iniciarReproduccion();
 }
 
-function prepararLienzoConPlaceholder() {
+function prepararLienzoConPlaceholder(motivo) {
   anchoLienzo = 420;
   altoLienzo = 520;
 
@@ -677,7 +737,12 @@ function prepararLienzoConPlaceholder() {
 
   fuenteLista = true;
   document.querySelector("#camara-label").textContent = "sin cámara (silueta de referencia)";
-  document.querySelector("#aviso-camara").hidden = false;
+
+  const aviso = document.querySelector("#aviso-camara");
+  aviso.textContent = MENSAJES_ERROR_CAMARA[motivo] ?? MENSAJES_ERROR_CAMARA.desconocido;
+  aviso.hidden = false;
+  document.querySelector("#reintentar-camara").hidden = false;
+
   dibujarFrameIdle();
   iniciarReproduccion();
 }

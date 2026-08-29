@@ -25,8 +25,9 @@ h1{font-size:clamp(34px,4vw,56px);font-weight:300;letter-spacing:-.04em;margin-b
    mantiene fuera de pantalla (no display:none) para que el navegador
    siga decodificando frames en segundo plano. */
 #camara-video{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden}
-.aviso-camara{position:absolute;left:38px;bottom:52px;max-width:520px;color:var(--text-faint);font-size:11px;line-height:1.5}
+.aviso-camara{position:absolute;left:38px;bottom:78px;max-width:520px;color:var(--text-faint);font-size:11px;line-height:1.5}
 .aviso-camara code{color:var(--text-soft)}
+.reintentar-camara{position:absolute;left:38px;bottom:52px;width:auto;padding:7px 14px;font-size:10px}
 .hint{position:absolute;left:38px;bottom:26px;color:var(--text-faint);font-size:11px}
 .controls-panel{height:100vh;height:100dvh;padding:25px 26px 18px;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
 .panel-header{padding-bottom:14px;border-bottom:1px solid var(--line)}
@@ -39,6 +40,11 @@ h1{font-size:clamp(34px,4vw,56px);font-weight:300;letter-spacing:-.04em;margin-b
 .status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--live);margin-right:4px;box-shadow:0 0 8px rgba(146,179,156,.4)}
 .control-group{padding:16px 0;border-bottom:1px solid var(--line)}
 button{display:block;width:100%;border:1px solid var(--accent);background:var(--accent);color:#111;padding:11px;font:inherit;font-size:11px;font-weight:600;letter-spacing:.02em;cursor:pointer}
+/* `button{display:block}` de arriba pisa el display:none del atributo
+   hidden nativo (un estilo de autor siempre gana al del user-agent,
+   sin importar especificidad) — sin esto, un <button hidden> igual
+   se ve. */
+button[hidden]{display:none}
 .condicion-card{padding:18px 0;border-bottom:1px solid var(--line)}
 .condicion-eyebrow{display:block;color:var(--text-faint);font-size:10px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;margin-bottom:8px}
 #condicion-label{display:block;font-size:26px;font-weight:300;letter-spacing:-.01em;margin-bottom:8px}
