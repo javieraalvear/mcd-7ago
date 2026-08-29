@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Campo de Datos 01 · Corrupción biométrica</title>
+  <title>Cadena de observadores · Biometría WESAD</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -12,44 +12,51 @@
       <header class="project-header">
         <p class="eyebrow">COMPUTACIÓN AVANZADA · MCD UAI</p>
         <h1>La imagen es el dato</h1>
-        <p class="subtitle">WESAD: EDA, variabilidad de pulso y temperatura de muñeca de un sujeto corrompen en vivo tu propia cámara, canal por canal, técnica por técnica. No es tu imagen distorsionada por un efecto — es tu imagen mediada, en tiempo real, por la respuesta involuntaria de otro cuerpo.</p>
+        <p class="subtitle">WESAD: EDA, variabilidad de pulso y temperatura de muñeca de un sujeto corrompen en vivo una fotografía, canal por canal, técnica por técnica. No hay gráfico: la distorsión es la visualización.</p>
       </header>
 
       <div id="viewport">
         <video id="camara-video" autoplay playsinline muted></video>
         <canvas id="lienzo"></canvas>
+        <video id="video-fuente" autoplay playsinline muted style="display:none"></video>
       </div>
 
-      <p id="aviso-camara" class="aviso-camara" hidden>
-        No se pudo acceder a la cámara (permiso denegado o no disponible). Mostrando una silueta de referencia generada por código.
+      <p id="aviso-imagen" class="aviso-imagen" hidden>
+        No se encontró una imagen en <code>assets/images/</code> (retrato.jpg / .jpeg / .png). Mostrando una silueta de referencia generada por código.
       </p>
 
-      <div class="hint">La sesión corre sola apenas hay cámara — pausa cuando quieras</div>
+      <div class="hint">Selecciona un sujeto y reproduce su sesión completa</div>
     </section>
 
     <aside class="controls-panel">
       <div class="panel-header">
-        <p class="eyebrow">FUENTE + REPRODUCCIÓN</p>
-        <h2>Dataset propio</h2>
-        <a class="ver-datos" href="./datos.html">Ver el CSV como gráfico simple →</a>
+        <p class="eyebrow">FUENTE + REPRESENTACIÓN</p>
+        <h2>Dataset propio · WESAD</h2>
       </div>
 
       <section class="status-card">
         <div class="status-row">
-          <span>CSV</span>
-          <strong id="estado-label"><i class="status-dot"></i> cargando</strong>
+          <span>Fuente biométrica</span>
+          <strong id="fuente-label">Cargando…</strong>
         </div>
         <div class="status-row">
-          <span>Cámara</span>
-          <strong id="camara-label">cargando…</strong>
-        </div>
-        <div class="status-row">
-          <span>Sujeto (fuente WESAD)</span>
-          <strong id="sujeto-label">—</strong>
+          <span>Imagen</span>
+          <strong id="imagen-label">cargando…</strong>
         </div>
       </section>
 
+      <section class="condicion-card">
+        <span class="condicion-eyebrow">Condición activa</span>
+        <strong id="condicion-label" data-condicion="">—</strong>
+        <p class="condicion-nota" id="condicion-nota">Presiona "Iniciar sesión" para reproducir la biometría de este sujeto sobre tu propio reflejo.</p>
+      </section>
+
       <section class="control-group">
+        <label class="select-label">
+          <span>Sujeto</span>
+          <select id="filtro-sujeto"></select>
+        </label>
+
         <button id="reproducir">Reproducir sesión</button>
       </section>
 
@@ -59,32 +66,31 @@
         <p class="condicion-nota">Solo para verificar durante el desarrollo — no es una leyenda de color: baseline, estrés y diversión se distinguen por qué combinación de técnicas se activa, no por un tono.</p>
       </section>
 
-      <section class="mapping lectura-viva">
-        <h3>Cruce en vivo — dato del sujeto → técnica aplicada</h3>
-        <div class="map-row">
-          <b>EDA norm. <span id="lectura-eda-valor" class="lectura-valor">—</span></b>
-          <span>→</span>
-          <em>pixel sorting <span id="lectura-eda-tecnica" class="lectura-valor">—</span></em>
-        </div>
-        <div class="map-row">
-          <b>variab. BVP <span id="lectura-bvp-valor" class="lectura-valor">—</span></b>
-          <span>→</span>
-          <em>frame bleed <span id="lectura-bvp-tecnica" class="lectura-valor">—</span></em>
-        </div>
-        <div class="map-row">
-          <b>temp norm. (inv.) <span id="lectura-temp-valor" class="lectura-valor">—</span></b>
-          <span>→</span>
-          <em>aberración <span id="lectura-temp-tecnica" class="lectura-valor">—</span></em>
-        </div>
-        <p class="condicion-nota">Los números de la izquierda son el dato normalizado (0–1) del bloque temporal activo, tomado de la sesión del sujeto WESAD indicado arriba. Los de la derecha son lo que esa técnica efectivamente le hizo a este frame de tu cámara.</p>
+      <section class="mapping">
+        <h3>Mapeos (uno por variable)</h3>
+        <div class="map-row"><b>EDA norm. por sujeto</b><span>→</span><em>pixel sorting</em></div>
+        <div class="map-row"><b>variabilidad de BVP</b><span>→</span><em>frame bleed</em></div>
+        <div class="map-row"><b>temp_mean (invertido)</b><span>→</span><em>aberración cromática</em></div>
       </section>
 
-      <section class="mapping">
-        <h3>Gramática por condición</h3>
-        <div class="map-row"><b>baseline</b><span>→</span><em>las tres técnicas casi apagadas</em></div>
-        <div class="map-row"><b>estrés</b><span>→</span><em>sorting agresivo + aberración marcada + bleed errático</em></div>
-        <div class="map-row"><b>diversión</b><span>→</span><em>bleed rítmico, sorting leve, sin aberración</em></div>
+      <div class="actions">
+        <button id="reproducir">Iniciar sesión</button>
+        <button id="reiniciar">Reiniciar</button>
+      </div>
+    </aside>
+  </main>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>        <div class="map-row"><b>variabilidad de BVP</b><span>→</span><em>frame bleed</em></div>
+        <div class="map-row"><b>temperatura (invertida)</b><span>→</span><em>aberración cromática</em></div>
+        <div class="map-row"><b>condición</b><span>→</span><em>gramática de combinación</em></div>
       </section>
+
+      <div class="actions">
+        <button id="reproducir">Iniciar sesión</button>
+        <button id="reiniciar" class="secondary">Reiniciar</button>
+      </div>
     </aside>
   </main>
 
