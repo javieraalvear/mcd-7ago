@@ -739,7 +739,11 @@ function prepararLienzoConPlaceholder(motivo) {
   document.querySelector("#camara-label").textContent = "sin cámara (silueta de referencia)";
 
   const aviso = document.querySelector("#aviso-camara");
-  aviso.textContent = MENSAJES_ERROR_CAMARA[motivo] ?? MENSAJES_ERROR_CAMARA.desconocido;
+  // Si el navegador tira un error que no está en el mapa, igual se
+  // muestra su nombre real en pantalla — así se puede diagnosticar
+  // sin abrir la consola de desarrollador.
+  aviso.textContent =
+    MENSAJES_ERROR_CAMARA[motivo] ?? `${MENSAJES_ERROR_CAMARA.desconocido} (${motivo ?? "sin detalle"})`;
   aviso.hidden = false;
   document.querySelector("#reintentar-camara").hidden = false;
 
