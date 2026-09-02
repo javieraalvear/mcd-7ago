@@ -1,534 +1,261 @@
-import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-
 // ======================================================
 // 01 — CONFIGURACIÓN
 // ======================================================
-// Usamos un feed GBFS público de Citi Bike (Nueva York).
-// station_information describe dónde están las estaciones y su capacidad.
-// station_status describe su estado actual: bicicletas y anclajes disponibles.
+// Fuente: rse.csv, datos reales de openpsychometrics.org
+// (Rosenberg Self-Esteem Scale). Cada fila es una persona real.
+//
+// Codebook confirmado:
+// Q1-Q10: 1=muy en desacuerdo .. 4=muy de acuerdo, 0=sin respuesta.
+// Ítems invertidos del Rosenberg original: Q3, Q5, Q8, Q9, Q10.
+// gender: 1=hombre, 2=mujer, 3=otro (el codebook original tiene un
+// error de tipeo aquí, se usa la convención estándar del dataset).
+// age: 0 = respuesta no convertible a número entero.
 
-const URL_INFO =
-  "https://gbfs.lyft.com/gbfs/2.3/bkn/es/station_information.json";
+const RUTA_CSV = "./assets/data/rse.csv";
+const ITEMS_INVERTIDOS = new Set(["Q3", "Q5", "Q8", "Q9", "Q10"]);
 
-const URL_ESTADO =
-  "https://gbfs.lyft.com/gbfs/2.3/bkn/es/station_status.json";
+const COLOR_GENERO = {
+  1: "rgba(111, 155, 209, 0.45)", // hombre
+  2: "rgba(217, 122, 151, 0.45)", // mujer
+  3: "rgba(217, 164, 65, 0.45)",  // otro
+};
+const NOMBRE_GENERO = { 1: "Hombre", 2: "Mujer", 3: "Otro" };
 
-const INTERVALO_ACTUALIZACION = 15; // segundos.
-
-const parametros = {
-  modo: "geografico",
-  escalaAltura: 0.15,
-  escalaAncho: 0.5,
-  cantidad: 80,
+const filtros = {
+  edadMin: 15,
+  edadMax: 70,
+  generos: new Set([1, 2, 3]),
 };
 
-let actualizacionAutomatica = true;
-let segundosRestantes = INTERVALO_ACTUALIZACION;
-let estaciones = [];
-let objetosEstacion = [];
+let personas = []; // { edad, puntaje, genero }
+let personasVisibles = [];
+
+const canvas = document.querySelector("#lienzo");
+const ctx = canvas.getContext("2d");
+const margen = { izq: 55, der: 20, arriba: 20, abajo: 45 };
+const areaGrafico = {
+  x: margen.izq,
+  y: margen.arriba,
+  ancho: canvas.width - margen.izq - margen.der,
+  alto: canvas.height - margen.arriba - margen.abajo,
+};
+
+const ejeX = { min: 10, max: 90 };  // rango de edad mostrado en el eje
+const ejeY = { min: 10, max: 40 };  // rango posible del puntaje Rosenberg
 
 // ======================================================
-// 02 — ESCENA
+// 02 — CARGA Y PARSEO
 // ======================================================
 
-const viewport = document.querySelector("#viewport");
-const escena = new THREE.Scene();
-escena.background = new THREE.Color(0x0b0b0c);
-
-const camara = new THREE.PerspectiveCamera(
-  42,
-  viewport.clientWidth / viewport.clientHeight,
-  0.1,
-  300
-);
-camara.position.set(18, 46, 24);
-
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(viewport.clientWidth, viewport.clientHeight);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-viewport.appendChild(renderer.domElement);
-
-const controlesOrbita = new OrbitControls(camara, renderer.domElement);
-controlesOrbita.enableDamping = true;
-controlesOrbita.target.set(0, 2, 0);
-
-escena.add(new THREE.HemisphereLight(0xf2eee4, 0x1f2228, 1.8));
-
-const luzPrincipal = new THREE.DirectionalLight(0xffffff, 2.7);
-luzPrincipal.position.set(18, 28, 14);
-luzPrincipal.castShadow = true;
-escena.add(luzPrincipal);
-
-const suelo = new THREE.Mesh(
-  new THREE.PlaneGeometry(90, 90),
-  new THREE.MeshStandardMaterial({ color: 0x101114, roughness: 1 })
-);
-suelo.rotation.x = -Math.PI / 2;
-suelo.position.y = -0.02;
-suelo.receiveShadow = true;
-escena.add(suelo);
-
-const grilla = new THREE.GridHelper(70, 70, 0x34383d, 0x1e2024);
-grilla.position.y = 0.001;
-escena.add(grilla);
-
-const grupoEstaciones = new THREE.Group();
-escena.add(grupoEstaciones);
-
-const grupoBaseGeografica = new THREE.Group();
-escena.add(grupoBaseGeografica);
-
-// ======================================================
-// 03 — DATOS: FETCH + FALLBACK
-// ======================================================
-
-async function cargarDatosVivos() {
-  actualizarEstadoConexion("conectando");
-
+async function cargarDatos() {
   try {
-    // Dos fuentes del mismo sistema:
-    // 1) información espacial y capacidad
-    // 2) estado operativo actual
-    const [respuestaInfo, respuestaEstado] = await Promise.all([
-      fetch(URL_INFO, { cache: "no-store" }),
-      fetch(URL_ESTADO, { cache: "no-store" }),
-    ]);
+    const respuesta = await fetch(RUTA_CSV, { cache: "no-store" });
+    if (!respuesta.ok) throw new Error("No se pudo leer rse.csv");
+    const texto = await respuesta.text();
 
-    if (!respuestaInfo.ok || !respuestaEstado.ok) {
-      throw new Error("La API respondió con un estado no válido.");
-    }
+    personas = procesarCSV(texto);
 
-    const info = await respuestaInfo.json();
-    const estado = await respuestaEstado.json();
+    document.querySelector("#fuente-label").textContent =
+      "Rosenberg Scale (openpsychometrics.org)";
 
-    estaciones = combinarFeedsGBFS(info, estado);
-    actualizarEstadoConexion("vivo");
-    document.querySelector("#fuente-label").textContent = "Citi Bike · GBFS";
-    document.querySelector("#actualizacion-label").textContent =
-      formatearHora(estado.last_updated);
-
-    generarRepresentacion();
+    aplicarFiltros();
   } catch (error) {
-    console.warn("No fue posible usar el feed vivo. Se utilizará el dataset local.", error);
-    await cargarRespaldoLocal();
+    console.error(error);
+    document.querySelector("#fuente-label").textContent = "Error cargando rse.csv";
   }
 }
 
-async function cargarRespaldoLocal() {
-  const respuesta = await fetch("./assets/data/movilidad-respaldo.json");
-  const datos = await respuesta.json();
+function procesarCSV(texto) {
+  const lineas = texto.trim().split("\n");
 
-  estaciones = datos.estaciones;
-  actualizarEstadoConexion("respaldo");
-  document.querySelector("#fuente-label").textContent = "Dataset local · respaldo";
-  document.querySelector("#actualizacion-label").textContent = "archivo local";
+  // el delimitador real varía según cómo se exportó el archivo;
+  // probamos tab, luego coma, luego cualquier espacio.
+  const delimitador = lineas[0].includes("\t")
+    ? "\t"
+    : lineas[0].includes(",")
+    ? ","
+    : /\s+/;
 
-  generarRepresentacion();
-}
+  const encabezados = lineas[0].trim().split(delimitador);
 
-function combinarFeedsGBFS(info, estado) {
-  // station_id es la llave que permite unir ambos feeds.
-  const estadosPorId = new Map(
-    estado.data.stations.map((estacion) => [estacion.station_id, estacion])
-  );
-
-  return info.data.stations
-    .map((estacionInfo) => {
-      const estacionEstado = estadosPorId.get(estacionInfo.station_id);
-      if (!estacionEstado) return null;
-
-      const capacidad = estacionInfo.capacity ?? 0;
-      const bicicletas = estacionEstado.num_bikes_available ?? 0;
-      const anclajesLibres = estacionEstado.num_docks_available ?? 0;
-
-      return {
-        id: estacionInfo.station_id,
-        nombre: estacionInfo.name,
-        lat: estacionInfo.lat,
-        lon: estacionInfo.lon,
-        capacidad,
-        bicicletas,
-        anclajes_libres: anclajesLibres,
-      };
+  return lineas
+    .slice(1)
+    .map((linea) => {
+      const valores = linea.trim().split(delimitador);
+      const fila = {};
+      encabezados.forEach((clave, i) => (fila[clave] = valores[i]));
+      return calcularPersona(fila);
     })
-    .filter(Boolean)
-    .filter((estacion) => estacion.capacidad > 0);
+    .filter(Boolean);
 }
 
-// ======================================================
-// 04 — REGLAS: INPUT → RELACIÓN → OUTPUT
-// ======================================================
+// REGLA: de las 10 respuestas crudas a un puntaje único 10-40,
+// invirtiendo los ítems que corresponde según el Rosenberg original.
+function calcularPersona(fila) {
+  const edad = Number(fila.age);
+  const genero = Number(fila.gender);
 
-function calcularOcupacion(estacion) {
-  return estacion.capacidad > 0
-    ? estacion.bicicletas / estacion.capacidad
-    : 0;
-}
+  if (!edad || edad < 5 || edad > 100) return null; // 0 = sin respuesta válida
+  if (![1, 2, 3].includes(genero)) return null;
 
-function proyectarGeograficamente(estacionesSeleccionadas) {
-  // No construimos un mapa cartográfico exacto.
-  // Para este LAB hacemos una proyección local simple:
-  // longitud → X, latitud → Z.
-  const latitudes = estacionesSeleccionadas.map((e) => e.lat);
-  const longitudes = estacionesSeleccionadas.map((e) => e.lon);
+  let puntaje = 0;
+  for (let i = 1; i <= 10; i++) {
+    const clave = `Q${i}`;
+    const valorCrudo = Number(fila[clave]);
+    if (!valorCrudo || valorCrudo < 1 || valorCrudo > 4) return null; // excluye sin respuesta
 
-  const latCentro = (Math.min(...latitudes) + Math.max(...latitudes)) / 2;
-  const lonCentro = (Math.min(...longitudes) + Math.max(...longitudes)) / 2;
-
-  return estacionesSeleccionadas.map((estacion) => ({
-    ...estacion,
-    x: (estacion.lon - lonCentro) * 150,
-    z: -(estacion.lat - latCentro) * 150,
-  }));
-}
-
-function ordenarPorOcupacion(estacionesSeleccionadas) {
-  const ordenadas = [...estacionesSeleccionadas].sort(
-    (a, b) => calcularOcupacion(b) - calcularOcupacion(a)
-  );
-
-  const columnas = Math.ceil(Math.sqrt(ordenadas.length));
-  const separacion = 2.0;
-
-  return ordenadas.map((estacion, indice) => {
-    const columna = indice % columnas;
-    const fila = Math.floor(indice / columnas);
-
-    return {
-      ...estacion,
-      x: (columna - columnas / 2) * separacion,
-      z: (fila - columnas / 2) * separacion,
-    };
-  });
-}
-
-function generarRepresentacion() {
-  limpiarRepresentacion();
-
-  const seleccion = seleccionarEstaciones(estaciones, parametros.cantidad);
-
-  const distribuidas =
-    parametros.modo === "geografico"
-      ? proyectarGeograficamente(seleccion)
-      : ordenarPorOcupacion(seleccion);
-
-  actualizarBaseGeografica(distribuidas);
-  distribuidas.forEach(crearModuloEstacion);
-}
-
-function seleccionarEstaciones(lista, cantidad) {
-  // Elegimos un conjunto estable y suficientemente representativo.
-  // Ordenar por capacidad evita que el subconjunto dependa del orden arbitrario del feed.
-  return [...lista]
-    .sort((a, b) => b.capacidad - a.capacidad)
-    .slice(0, cantidad);
-}
-
-function crearModuloEstacion(estacion) {
-  const ocupacion = calcularOcupacion(estacion);
-
-  // REGLA 1:
-  // capacidad total → altura total del contenedor.
-  const alturaTotal =
-    Math.max(1.4, estacion.capacidad * parametros.escalaAltura);
-
-  // REGLA 2:
-  // bicicletas disponibles → fracción llena.
-  const alturaBicicletas = Math.max(0.08, alturaTotal * ocupacion);
-
-  // REGLA 3:
-  // porcentaje de ocupación → ancho del módulo.
-  const ancho =
-    (0.55 + ocupacion * 0.75) *
-    parametros.escalaAncho;
-
-  const grupo = new THREE.Group();
-  grupo.position.set(estacion.x, 0, estacion.z);
-  grupo.userData.estacion = estacion;
-
-  // Contenedor: representa la capacidad total.
-  const geometriaCapacidad = new THREE.BoxGeometry(ancho, alturaTotal, ancho);
-  const materialCapacidad = new THREE.MeshStandardMaterial({
-    color: 0x34383e,
-    roughness: 0.9,
-    transparent: true,
-    opacity: 0.55,
-  });
-
-  const capacidad = new THREE.Mesh(geometriaCapacidad, materialCapacidad);
-  capacidad.position.y = alturaTotal / 2;
-  capacidad.userData.estacion = estacion;
-  grupo.add(capacidad);
-
-  // Volumen claro: representa las bicicletas actualmente disponibles.
-  const geometriaBicicletas = new THREE.BoxGeometry(
-    ancho * 0.72,
-    alturaBicicletas,
-    ancho * 0.72
-  );
-  const materialBicicletas = new THREE.MeshStandardMaterial({
-    color: 0xddd7ca,
-    roughness: 0.5,
-  });
-
-  const bicicletas = new THREE.Mesh(geometriaBicicletas, materialBicicletas);
-  bicicletas.position.y = alturaBicicletas / 2;
-  bicicletas.castShadow = true;
-  bicicletas.userData.estacion = estacion;
-  grupo.add(bicicletas);
-
-  grupoEstaciones.add(grupo);
-  objetosEstacion.push(capacidad, bicicletas);
-}
-
-function limpiarRepresentacion() {
-  objetosEstacion = [];
-
-  while (grupoEstaciones.children.length > 0) {
-    const grupo = grupoEstaciones.children[0];
-
-    grupo.traverse((objeto) => {
-      if (objeto.geometry) objeto.geometry.dispose();
-      if (objeto.material) objeto.material.dispose();
-    });
-
-    grupoEstaciones.remove(grupo);
+    puntaje += ITEMS_INVERTIDOS.has(clave) ? 5 - valorCrudo : valorCrudo;
   }
+
+  return { edad, puntaje, genero };
 }
 
-function actualizarBaseGeografica(estacionesDistribuidas) {
-  limpiarBaseGeografica();
-  grupoBaseGeografica.visible = parametros.modo === "geografico";
+// ======================================================
+// 03 — FILTROS
+// ======================================================
 
-  if (!grupoBaseGeografica.visible || estacionesDistribuidas.length === 0) return;
+function aplicarFiltros() {
+  personasVisibles = personas.filter(
+    (p) =>
+      p.edad >= filtros.edadMin &&
+      p.edad <= filtros.edadMax &&
+      filtros.generos.has(p.genero)
+  );
 
-  const xs = estacionesDistribuidas.map((estacion) => estacion.x);
-  const zs = estacionesDistribuidas.map((estacion) => estacion.z);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minZ = Math.min(...zs);
-  const maxZ = Math.max(...zs);
-  const ancho = maxX - minX;
-  const profundidad = maxZ - minZ;
-  const largoFlecha = Math.max(4, Math.min(ancho, profundidad) * 0.28);
-  const xGuia = minX - 3.2;
-  const zInicio = maxZ;
-  const zFinal = zInicio - largoFlecha;
+  document.querySelector("#conteo-label").textContent =
+    personasVisibles.length.toLocaleString("es-CL");
 
-  const materialGuia = new THREE.LineBasicMaterial({
-    color: 0xd9d2c3,
-    transparent: true,
-    opacity: 0.5,
+  dibujar();
+}
+
+// ======================================================
+// 04 — REGLAS: DATO → POSICIÓN EN PANTALLA
+// ======================================================
+
+function xDeEdad(edad) {
+  const t = (edad - ejeX.min) / (ejeX.max - ejeX.min);
+  return areaGrafico.x + t * areaGrafico.ancho;
+}
+
+function yDePuntaje(puntaje) {
+  const t = (puntaje - ejeY.min) / (ejeY.max - ejeY.min);
+  return areaGrafico.y + areaGrafico.alto - t * areaGrafico.alto;
+}
+
+// ======================================================
+// 05 — DIBUJO
+// ======================================================
+
+function dibujarEjes() {
+  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  ctx.font = "11px sans-serif";
+
+  ctx.beginPath();
+  ctx.moveTo(areaGrafico.x, areaGrafico.y);
+  ctx.lineTo(areaGrafico.x, areaGrafico.y + areaGrafico.alto);
+  ctx.lineTo(areaGrafico.x + areaGrafico.ancho, areaGrafico.y + areaGrafico.alto);
+  ctx.stroke();
+
+  for (let edad = 10; edad <= 90; edad += 10) {
+    const x = xDeEdad(edad);
+    ctx.fillText(edad, x - 6, areaGrafico.y + areaGrafico.alto + 18);
+  }
+  ctx.textAlign = "right";
+  for (let puntaje = 10; puntaje <= 40; puntaje += 10) {
+    const y = yDePuntaje(puntaje);
+    ctx.fillText(puntaje, areaGrafico.x - 8, y + 4);
+  }
+  ctx.textAlign = "left";
+  ctx.fillText("edad →", areaGrafico.x + areaGrafico.ancho - 40, areaGrafico.y + areaGrafico.alto + 34);
+  ctx.save();
+  ctx.translate(14, areaGrafico.y + 10);
+  ctx.rotate(Math.PI / 2);
+  ctx.fillText("puntaje Rosenberg →", 0, 0);
+  ctx.restore();
+}
+
+function dibujar() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  dibujarEjes();
+
+  personasVisibles.forEach((persona) => {
+    ctx.beginPath();
+    ctx.arc(xDeEdad(persona.edad), yDePuntaje(persona.puntaje), 3, 0, Math.PI * 2);
+    ctx.fillStyle = COLOR_GENERO[persona.genero];
+    ctx.fill();
   });
-
-  const flecha = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(xGuia, 0.04, zInicio),
-      new THREE.Vector3(xGuia, 0.04, zFinal),
-    ]),
-    materialGuia
-  );
-
-  const cabeza = new THREE.Mesh(
-    new THREE.ConeGeometry(0.42, 1.1, 3),
-    new THREE.MeshBasicMaterial({
-      color: 0xd9d2c3,
-      transparent: true,
-      opacity: 0.55,
-    })
-  );
-  cabeza.rotation.x = Math.PI / 2;
-  cabeza.rotation.z = Math.PI;
-  cabeza.position.set(xGuia, 0.06, zFinal - 0.46);
-
-  grupoBaseGeografica.add(flecha, cabeza);
-  grupoBaseGeografica.add(crearEtiquetaSuelo("N", xGuia, zFinal - 1.45, 42));
-  grupoBaseGeografica.add(
-    crearEtiquetaSuelo("lon → / lat ↑", minX, maxZ + 1.9, 34)
-  );
 }
 
-function limpiarBaseGeografica() {
-  limpiarGrupo(grupoBaseGeografica);
-}
+// ======================================================
+// 06 — INTERACCIÓN: HOVER
+// ======================================================
 
-function limpiarGrupo(grupo) {
-  while (grupo.children.length > 0) {
-    const objeto = grupo.children[0];
+canvas.addEventListener("mousemove", (evento) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = ((evento.clientX - rect.left) / rect.width) * canvas.width;
+  const my = ((evento.clientY - rect.top) / rect.height) * canvas.height;
 
-    if (objeto.geometry) objeto.geometry.dispose();
-    if (objeto.material) {
-      if (objeto.material.map) objeto.material.map.dispose();
-      objeto.material.dispose();
+  let masCercano = null;
+  let distanciaMinima = 10; // radio de detección en píxeles
+
+  for (const persona of personasVisibles) {
+    const px = xDeEdad(persona.edad);
+    const py = yDePuntaje(persona.puntaje);
+    const distancia = Math.hypot(px - mx, py - my);
+    if (distancia < distanciaMinima) {
+      distanciaMinima = distancia;
+      masCercano = persona;
     }
-
-    grupo.remove(objeto);
   }
-}
 
-function crearEtiquetaSuelo(texto, x, z, tamanoFuente) {
-  const canvas = document.createElement("canvas");
-  const contexto = canvas.getContext("2d");
-  canvas.width = 256;
-  canvas.height = 96;
-
-  contexto.fillStyle = "rgba(217, 210, 195, 0.72)";
-  contexto.font = `${tamanoFuente}px Roboto, Arial, sans-serif`;
-  contexto.textAlign = "center";
-  contexto.textBaseline = "middle";
-  contexto.fillText(texto, canvas.width / 2, canvas.height / 2);
-
-  const textura = new THREE.CanvasTexture(canvas);
-  const etiqueta = new THREE.Sprite(
-    new THREE.SpriteMaterial({
-      map: textura,
-      transparent: true,
-      depthWrite: false,
-    })
-  );
-  etiqueta.position.set(x, 0.18, z);
-  etiqueta.scale.set(5.4, 2.0, 1);
-
-  return etiqueta;
-}
-
-// ======================================================
-// 05 — INTERFAZ + INSPECTOR
-// ======================================================
-
-const raycaster = new THREE.Raycaster();
-const puntero = new THREE.Vector2();
-
-renderer.domElement.addEventListener("pointerdown", (event) => {
-  const rect = renderer.domElement.getBoundingClientRect();
-
-  puntero.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  puntero.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-  raycaster.setFromCamera(puntero, camara);
-
-  const intersecciones = raycaster.intersectObjects(objetosEstacion, false);
-
-  if (intersecciones.length > 0) {
-    mostrarEstacion(intersecciones[0].object.userData.estacion);
-  }
+  const tooltip = document.querySelector("#tooltip");
+  tooltip.textContent = masCercano
+    ? `${NOMBRE_GENERO[masCercano.genero]} · ${masCercano.edad} años · puntaje ${masCercano.puntaje}/40`
+    : "Pasa el mouse sobre un punto para ver el detalle.";
 });
 
-function mostrarEstacion(estacion) {
-  const ocupacion = calcularOcupacion(estacion);
+// ======================================================
+// 07 — CONTROLES
+// ======================================================
 
-  document.querySelector("#estacion-nombre").textContent = estacion.nombre;
-  document.querySelector("#m-bicis").textContent = estacion.bicicletas;
-  document.querySelector("#m-libres").textContent = estacion.anclajes_libres;
-  document.querySelector("#m-capacidad").textContent = estacion.capacidad;
-  document.querySelector("#m-ocupacion").textContent =
-    `${Math.round(ocupacion * 100)}%`;
-}
-
-document.querySelector("#modo-distribucion").addEventListener("change", (event) => {
-  parametros.modo = event.target.value;
-  generarRepresentacion();
-});
-
-conectarSlider("escala-altura", "escala-altura-valor", "escalaAltura", 2);
-conectarSlider("escala-ancho", "escala-ancho-valor", "escalaAncho", 2);
-conectarSlider("cantidad", "cantidad-valor", "cantidad", 0);
-
-function conectarSlider(idControl, idValor, parametro, decimales) {
-  const control = document.querySelector(`#${idControl}`);
-  const valor = document.querySelector(`#${idValor}`);
-
-  control.addEventListener("input", (event) => {
-    parametros[parametro] = Number(event.target.value);
-    valor.value = parametros[parametro].toFixed(decimales);
-    generarRepresentacion();
+function conectarRango(idInput, idOutput, clave) {
+  const input = document.querySelector(`#${idInput}`);
+  const output = document.querySelector(`#${idOutput}`);
+  input.addEventListener("input", () => {
+    filtros[clave] = Number(input.value);
+    output.value = input.value;
+    aplicarFiltros();
   });
 }
 
-document.querySelector("#actualizar").addEventListener("click", async () => {
-  segundosRestantes = INTERVALO_ACTUALIZACION;
-  await cargarDatosVivos();
-});
+conectarRango("edad-min", "edad-min-valor", "edadMin");
+conectarRango("edad-max", "edad-max-valor", "edadMax");
 
-document.querySelector("#pausar").addEventListener("click", (event) => {
-  actualizacionAutomatica = !actualizacionAutomatica;
-  event.target.textContent = actualizacionAutomatica
-    ? "Pausar auto"
-    : "Reanudar auto";
-
-  document.querySelector("#cuenta-regresiva").textContent =
-    actualizacionAutomatica ? `${segundosRestantes} s` : "pausada";
-});
-
-function actualizarEstadoConexion(tipo) {
-  const estado = document.querySelector("#estado-label");
-
-  if (tipo === "vivo") {
-    estado.innerHTML = '<i class="status-dot"></i> conectado';
-  } else if (tipo === "respaldo") {
-    estado.textContent = "respaldo local";
-  } else {
-    estado.textContent = "conectando…";
-  }
-}
-
-function formatearHora(timestamp) {
-  if (!timestamp) return new Date().toLocaleTimeString("es-CL");
-
-  // GBFS v2 usa epoch seconds.
-  const fecha = new Date(timestamp * 1000);
-
-  return fecha.toLocaleTimeString("es-CL", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
+[1, 2, 3].forEach((genero) => {
+  document.querySelector(`#genero-${genero}`).addEventListener("change", (evento) => {
+    if (evento.target.checked) filtros.generos.add(genero);
+    else filtros.generos.delete(genero);
+    aplicarFiltros();
   });
-}
+});
+
+document.querySelector("#reset").addEventListener("click", () => {
+  filtros.edadMin = 15;
+  filtros.edadMax = 70;
+  filtros.generos = new Set([1, 2, 3]);
+
+  document.querySelector("#edad-min").value = 15;
+  document.querySelector("#edad-max").value = 70;
+  document.querySelector("#edad-min-valor").value = 15;
+  document.querySelector("#edad-max-valor").value = 70;
+  [1, 2, 3].forEach((g) => (document.querySelector(`#genero-${g}`).checked = true));
+
+  aplicarFiltros();
+});
 
 // ======================================================
-// 06 — POLLING RESPONSABLE
-// ======================================================
-// La app consulta periódicamente el feed para mantener visible la fuente viva.
-// El feed puede declarar un TTL mayor, por lo que algunas respuestas pueden repetirse.
-// El contador mantiene visible que el sistema está esperando la próxima actualización.
-
-setInterval(async () => {
-  if (!actualizacionAutomatica) return;
-
-  segundosRestantes -= 1;
-  document.querySelector("#cuenta-regresiva").textContent =
-    `${segundosRestantes} s`;
-
-  if (segundosRestantes <= 0) {
-    segundosRestantes = INTERVALO_ACTUALIZACION;
-    await cargarDatosVivos();
-  }
-}, 1000);
-
-// ======================================================
-// 07 — ANIMACIÓN + RESPONSIVE
+// 08 — ARRANQUE
 // ======================================================
 
-function animar() {
-  requestAnimationFrame(animar);
-  controlesOrbita.update();
-  renderer.render(escena, camara);
-}
-
-function ajustarVentana() {
-  const ancho = viewport.clientWidth;
-  const altura = viewport.clientHeight;
-
-  camara.aspect = ancho / altura;
-  camara.updateProjectionMatrix();
-  renderer.setSize(ancho, altura);
-}
-
-window.addEventListener("resize", ajustarVentana);
-
-cargarDatosVivos();
-animar();
+cargarDatos();

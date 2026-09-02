@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Campo de Datos 01</title>
+  <title>Autoestima y edad · Rosenberg Self-Esteem Scale</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -11,24 +11,26 @@
     <section class="viewport-shell">
       <header class="project-header">
         <p class="eyebrow">COMPUTACIÓN AVANZADA · MCD UAI</p>
-        <h1>Campo de Datos 01</h1>
-        <p class="subtitle">Estado vivo de un sistema de bicicletas compartidas transformado en geometría.</p>
+        <h1>Autoestima, ¿cambia con la edad?</h1>
+        <p class="subtitle">Datos reales de miles de respuestas a la Rosenberg Self-Esteem Scale (openpsychometrics.org). Cada punto es una persona real: su edad y su puntaje de autoestima calculado a partir de sus 10 respuestas.</p>
       </header>
 
-      <div id="viewport"></div>
-
-      <div class="legend">
-        <span><i class="dot bikes"></i>Bicicletas disponibles</span>
-        <span><i class="dot empty"></i>Capacidad restante</span>
+      <div id="viewport">
+        <canvas id="lienzo" width="900" height="620"></canvas>
       </div>
 
-      <div class="hint">Arrastra para orbitar · Rueda para acercar · Click en una estación para inspeccionarla</div>
+      <p class="aviso-imagen">
+        Fuente: openpsychometrics.org, Rosenberg Self-Esteem Scale (Rosenberg, 1965).
+        Datos anonimizados, recolectados con consentimiento de los participantes.
+      </p>
+
+      <div class="hint" id="tooltip">Pasa el mouse sobre un punto para ver el detalle.</div>
     </section>
 
     <aside class="controls-panel">
       <div class="panel-header">
         <p class="eyebrow">FUENTE + REPRESENTACIÓN</p>
-        <h2>Sistema vivo</h2>
+        <h2>Dataset real</h2>
       </div>
 
       <section class="status-card">
@@ -37,83 +39,53 @@
           <strong id="fuente-label">Cargando…</strong>
         </div>
         <div class="status-row">
-          <span>Estado</span>
-          <strong id="estado-label"><i class="status-dot"></i> conectando</strong>
-        </div>
-        <div class="status-row">
-          <span>Última actualización</span>
-          <strong id="actualizacion-label">—</strong>
-        </div>
-        <div class="status-row">
-          <span>Próxima consulta</span>
-          <strong id="cuenta-regresiva">—</strong>
+          <span>Personas mostradas</span>
+          <strong id="conteo-label">—</strong>
         </div>
       </section>
 
       <section class="control-group">
-        <h3>Representación</h3>
+        <h3>Filtros</h3>
 
         <label class="select-label">
-          <span>Distribución</span>
-          <select id="modo-distribucion">
-            <option value="geografico">Geográfica · lat/lon → X/Z</option>
-            <option value="ocupacion">Ordenada · ocupación</option>
-          </select>
+          <span>Rango etario: <output id="edad-min-valor">15</output> – <output id="edad-max-valor">70</output> años</span>
+        </label>
+        <label>
+          <span>Edad mínima</span>
+          <input id="edad-min" type="range" min="10" max="90" value="15" />
+        </label>
+        <label>
+          <span>Edad máxima</span>
+          <input id="edad-max" type="range" min="10" max="90" value="70" />
         </label>
 
-        <label>
-          <span>Escala vertical</span>
-          <output id="escala-altura-valor">0.15</output>
-          <input id="escala-altura" type="range" min="0.05" max="0.3" step="0.01" value="0.15" />
+        <label class="select-label" style="margin-top:14px">
+          <span>Género</span>
         </label>
-
-        <label>
-          <span>Escala horizontal</span>
-          <output id="escala-ancho-valor">0.50</output>
-          <input id="escala-ancho" type="range" min="0.3" max="1.0" step="0.05" value="0.5" />
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <input id="genero-1" type="checkbox" checked style="width:auto" /> <span>Hombre</span>
         </label>
-
-        <label>
-          <span>N° estaciones</span>
-          <output id="cantidad-valor">80</output>
-          <input id="cantidad" type="range" min="20" max="180" step="10" value="80" />
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <input id="genero-2" type="checkbox" checked style="width:auto" /> <span>Mujer</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px">
+          <input id="genero-3" type="checkbox" checked style="width:auto" /> <span>Otro</span>
         </label>
       </section>
 
       <section class="mapping">
         <h3>Reglas de representación</h3>
-        <div class="map-row"><b>latitud / longitud</b><span>→</span><em>posición X/Z</em></div>
-        <div class="map-row"><b>bicicletas disponibles</b><span>→</span><em>altura llena</em></div>
-        <div class="map-row"><b>capacidad total</b><span>→</span><em>altura total</em></div>
-        <div class="map-row"><b>% ocupación</b><span>→</span><em>ancho</em></div>
-      </section>
-
-      <section class="inspector">
-        <h3>Estación seleccionada</h3>
-        <p id="estacion-nombre">Haz click sobre un módulo.</p>
-        <div class="metric-grid">
-          <div><span>Bicicletas</span><strong id="m-bicis">—</strong></div>
-          <div><span>Libres</span><strong id="m-libres">—</strong></div>
-          <div><span>Capacidad</span><strong id="m-capacidad">—</strong></div>
-          <div><span>Ocupación</span><strong id="m-ocupacion">—</strong></div>
-        </div>
+        <div class="map-row"><b>edad</b><span>→</span><em>posición X</em></div>
+        <div class="map-row"><b>puntaje Rosenberg (10-40)</b><span>→</span><em>posición Y</em></div>
+        <div class="map-row"><b>género</b><span>→</span><em>color</em></div>
       </section>
 
       <div class="actions">
-        <button id="actualizar">Actualizar ahora</button>
-        <button id="pausar" class="secondary">Pausar auto</button>
+        <button id="reset">Restablecer filtros</button>
       </div>
     </aside>
   </main>
 
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
-      }
-    }
-  </script>
   <script type="module" src="./main.js"></script>
 </body>
 </html>
