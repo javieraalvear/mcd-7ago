@@ -15,16 +15,14 @@
         <p class="subtitle">Datos reales de miles de respuestas a la Rosenberg Self-Esteem Scale (openpsychometrics.org). Cada punto es una persona real: su edad y su puntaje de autoestima calculado a partir de sus 10 respuestas.</p>
       </header>
 
-      <div id="viewport">
-        <canvas id="lienzo" width="900" height="620"></canvas>
-      </div>
+      <div id="viewport"></div>
 
       <p class="aviso-imagen">
         Fuente: openpsychometrics.org, Rosenberg Self-Esteem Scale (Rosenberg, 1965).
         Datos anonimizados, recolectados con consentimiento de los participantes.
       </p>
 
-      <div class="hint" id="tooltip">Pasa el mouse sobre un punto para ver el detalle.</div>
+      <div class="hint" id="tooltip">Arrastra para orbitar · Rueda para acercar · Pasa el mouse sobre un punto para ver el detalle.</div>
     </section>
 
     <aside class="controls-panel">
@@ -76,8 +74,8 @@
       <section class="mapping">
         <h3>Reglas de representación</h3>
         <div class="map-row"><b>edad</b><span>→</span><em>posición X</em></div>
-        <div class="map-row"><b>puntaje Rosenberg (10-40)</b><span>→</span><em>posición Y</em></div>
-        <div class="map-row"><b>género</b><span>→</span><em>color</em></div>
+        <div class="map-row"><b>puntaje Rosenberg (10-40)</b><span>→</span><em>posición Y (altura)</em></div>
+        <div class="map-row"><b>género</b><span>→</span><em>posición Z (profundidad) + color</em></div>
       </section>
 
       <div class="actions">
@@ -86,6 +84,14 @@
     </aside>
   </main>
 
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+      }
+    }
+  </script>
   <script type="module" src="./main.js"></script>
 </body>
 </html>

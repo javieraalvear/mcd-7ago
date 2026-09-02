@@ -1,181 +1,66 @@
-# Campo de Datos 01 — v0.2
+# Ejercicio 02 — Autoestima, ¿cambia con la edad?
 
-Starter para **Clase 03 — Computación Avanzada**  
-Magíster en Ciencias del Diseño · Universidad Adolfo Ibáñez
+Nube de puntos en **Three.js**: cada punto es una persona real que
+respondió la Rosenberg Self-Esteem Scale (openpsychometrics.org).
 
 ## Idea central
 
 > **Los datos no tienen una forma visual predeterminada. Diseñar una representación significa decidir qué información conservar, cómo relacionarla y cómo hacerla visible.**
 
-Este starter representa el estado de un sistema real de bicicletas compartidas utilizando datos públicos en formato **GBFS**.
-
-La aplicación intenta consultar el feed en tiempo real de **Citi Bike (Nueva York)** y utiliza un dataset local de respaldo si la fuente no está disponible.
-
 ## Fuente
 
-Citi Bike publica datos públicos de estado del sistema mediante GBFS.
-
-El starter utiliza:
-
-```text
-station_information
-```
-
-para:
-
-- nombre de la estación;
-- latitud;
-- longitud;
-- capacidad.
-
-Y:
+`assets/data/rse.csv` — ~46.000 respuestas reales a la Rosenberg
+Self-Esteem Scale (Rosenberg, 1965), publicadas por
+openpsychometrics.org. Cada fila trae las 10 respuestas crudas
+(Q1–Q10, escala 1–4), género y edad.
 
 ```text
-station_status
+Q1-Q10: 1=muy en desacuerdo .. 4=muy de acuerdo, 0=sin respuesta.
+Ítems invertidos del Rosenberg original: Q3, Q5, Q8, Q9, Q10.
+gender: 1=hombre, 2=mujer, 3=otro.
 ```
 
-para:
+`calcularPersona()` reduce las 10 respuestas a un único puntaje
+10–40 (más alto = más autoestima), invirtiendo los ítems que
+corresponde.
 
-- bicicletas disponibles;
-- anclajes disponibles;
-- estado actual.
+## Reglas de representación
 
-## Arquitectura conceptual
+| Dato | → | Posición |
+|---|---|---|
+| edad | → | X |
+| puntaje Rosenberg (10–40) | → | Y (altura) |
+| género | → | Z (profundidad) **+** color |
 
-```text
-FUENTE
-GBFS
+El género queda codificado dos veces a propósito: color solo no
+alcanza para distinguir grupos en una nube de puntos que rota — la
+posición en profundidad lo hace legible incluso de perfil.
 
-↓
+## Filtros
 
-FETCH
+Rango etario (edad mínima/máxima) y género, ambos re-filtran
+`personasVisibles` y reconstruyen la nube de puntos
+(`construirNubeDePuntos()`) sin recargar el CSV.
 
-↓
+## Interacción
 
-JSON
-
-↓
-
-SELECCIONAR + COMBINAR
-
-↓
-
-REGLAS DE REPRESENTACIÓN
-
-↓
-
-GEOMETRÍA
-```
-
-## Reglas incluidas
-
-### 1 — Posición
-
-```text
-latitud + longitud → posición X/Z
-```
-
-La distribución conserva aproximadamente la relación espacial entre estaciones.
-
-### 2 — Altura total
-
-```text
-capacidad de la estación → altura total
-```
-
-El contenedor oscuro representa el tamaño del sistema disponible en esa estación.
-
-### 3 — Volumen lleno
-
-```text
-bicicletas disponibles / capacidad → volumen ocupado
-```
-
-La geometría clara muestra cuánta capacidad está actualmente ocupada por bicicletas.
-
-### 4 — Ancho
-
-```text
-porcentaje de ocupación → ancho
-```
-
-Una estación con mayor ocupación también aumenta ligeramente su presencia horizontal.
-
-## Dataset local de respaldo
-
-```text
-assets/data/movilidad-respaldo.json
-```
-
-contiene datos sintéticos de estaciones.
-
-Este archivo permite:
-
-- completar LAB03 sin depender de internet;
-- comprender primero la estructura de los datos;
-- comparar una fuente estática con una fuente viva.
-
-Los datos de respaldo **no representan estaciones reales**.
+Arrastra para orbitar la escena (OrbitControls) · rueda para
+acercar/alejar · pasa el mouse sobre un punto para ver su detalle
+(raycasting sobre la nube, `THREE.Points`).
 
 ## Cómo ejecutarlo
 
-Usa VS Code + Live Server.
-
-1. Abre la carpeta.
-2. Click derecho sobre `index.html`.
-3. `Open with Live Server`.
-4. Abre Developer Tools → Console si la escena no carga.
+Usa VS Code + Live Server: click derecho sobre `index.html` → *Open
+with Live Server*.
 
 ## Archivos
 
 ```text
-campo-de-datos-01-v0.2/
+exercise-02/
 ├── index.html
 ├── styles.css
 ├── main.js
 ├── README.md
 └── assets/
-    └── data/
-        └── movilidad-respaldo.json
+    └── data/rse.csv
 ```
-
-## Qué mirar primero en `main.js`
-
-```text
-01 — CONFIGURACIÓN
-02 — ESCENA
-03 — DATOS: FETCH + FALLBACK
-04 — REGLAS: INPUT → RELACIÓN → OUTPUT
-05 — INTERFAZ + INSPECTOR
-06 — POLLING RESPONSABLE
-07 — ANIMACIÓN + RESPONSIVE
-```
-
-Para LAB03 el corazón conceptual está en:
-
-```js
-combinarFeedsGBFS()
-```
-
-y:
-
-```js
-crearModuloEstacion()
-```
-
-La primera convierte fuentes distintas en una estructura común.
-
-La segunda traduce esa información en geometría.
-
-## Experimento clave
-
-Selecciona una estación en la escena y lee sus datos:
-
-```text
-bicicletas
-anclajes libres
-capacidad
-ocupación
-```
-
-Luego identifica qué propiedad visual representa cada dato.
