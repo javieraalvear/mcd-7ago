@@ -3,95 +3,30 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Autoestima y edad · Rosenberg Self-Esteem Scale</title>
+  <title>Silueta de partículas · Rosenberg Self-Esteem Scale</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <main class="app-shell">
-    <section class="viewport-shell">
-      <header class="project-header">
-        <p class="eyebrow">COMPUTACIÓN AVANZADA · MCD UAI</p>
-        <h1>Autoestima, ¿cambia con la edad?</h1>
-        <p class="subtitle">Datos reales de miles de respuestas a la Rosenberg Self-Esteem Scale (openpsychometrics.org). Cada punto es una persona real: su edad y su puntaje de autoestima calculado a partir de sus 10 respuestas.</p>
-      </header>
+  <canvas id="lienzo"></canvas>
 
-      <div id="viewport"></div>
+  <p class="hud hud-superior-izq">COMPUTACIÓN AVANZADA · MCD UAI<br />RSE · SILUETA DE PARTÍCULAS</p>
 
-      <p class="aviso-imagen">
-        Fuente: openpsychometrics.org, Rosenberg Self-Esteem Scale (Rosenberg, 1965).
-        Datos anonimizados, recolectados con consentimiento de los participantes.
-      </p>
+  <p id="indicador" class="hud hud-superior-der">—</p>
 
-      <div class="hint" id="tooltip">Arrastra para orbitar · Rueda para acercar · Pasa el mouse sobre un punto para ver el detalle.</div>
-    </section>
+  <div class="hud hud-inferior-izq controles">
+    <button id="reproducir">Pausar</button>
 
-    <aside class="controls-panel">
-      <div class="panel-header">
-        <p class="eyebrow">FUENTE + REPRESENTACIÓN</p>
-        <h2>Dataset real</h2>
-      </div>
+    <label class="control-slider">
+      <span>EDAD <output id="valor-edad">25</output></span>
+      <input id="control-edad" type="range" min="5" max="90" value="25" />
+    </label>
 
-      <section class="status-card">
-        <div class="status-row">
-          <span>Fuente</span>
-          <strong id="fuente-label">Cargando…</strong>
-        </div>
-        <div class="status-row">
-          <span>Personas mostradas</span>
-          <strong id="conteo-label">—</strong>
-        </div>
-      </section>
+    <div class="control-genero">
+      <button data-genero="1">HOMBRE</button>
+      <button data-genero="2" class="activo">MUJER</button>
+    </div>
+  </div>
 
-      <section class="control-group">
-        <h3>Filtros</h3>
-
-        <label class="select-label">
-          <span>Rango etario: <output id="edad-min-valor">15</output> – <output id="edad-max-valor">70</output> años</span>
-        </label>
-        <label>
-          <span>Edad mínima</span>
-          <input id="edad-min" type="range" min="10" max="90" value="15" />
-        </label>
-        <label>
-          <span>Edad máxima</span>
-          <input id="edad-max" type="range" min="10" max="90" value="70" />
-        </label>
-
-        <label class="select-label" style="margin-top:14px">
-          <span>Género</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-          <input id="genero-1" type="checkbox" checked style="width:auto" /> <span>Hombre</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-          <input id="genero-2" type="checkbox" checked style="width:auto" /> <span>Mujer</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:8px">
-          <input id="genero-3" type="checkbox" checked style="width:auto" /> <span>Otro</span>
-        </label>
-      </section>
-
-      <section class="mapping">
-        <h3>Reglas de representación</h3>
-        <div class="map-row"><b>edad</b><span>→</span><em>posición X</em></div>
-        <div class="map-row"><b>puntaje Rosenberg (10-40)</b><span>→</span><em>posición Y (altura)</em></div>
-        <div class="map-row"><b>género</b><span>→</span><em>posición Z (profundidad) + color</em></div>
-      </section>
-
-      <div class="actions">
-        <button id="reset">Restablecer filtros</button>
-      </div>
-    </aside>
-  </main>
-
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
-      }
-    }
-  </script>
   <script type="module" src="./main.js"></script>
 </body>
 </html>
