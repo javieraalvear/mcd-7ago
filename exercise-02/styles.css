@@ -33,7 +33,6 @@ button{
   cursor:pointer;
 }
 button:hover{background:rgba(255,255,255,.12)}
-button.activo{background:#fff;color:#000}
 
 .control-slider{display:flex;flex-direction:column;gap:5px;color:#fff;font-size:10px}
 .control-slider output{font-variant-numeric:tabular-nums}
@@ -42,8 +41,6 @@ input[type=range]{
   accent-color:#fff;
   background:transparent;
 }
-
-.control-genero{display:flex;gap:6px}
 
 @media(max-width:640px){
   .hud-superior-der{max-width:80vw}
