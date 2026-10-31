@@ -4,30 +4,27 @@ Diseñadora industrial
 
 ## Hoy
 
-Docente y coordinación académica, diseño gráfico, Facultad de Diseño.
+29. Sag. Académica y coordinadora académica de Diseño Gráfico, Facultad de Diseño.
+Santiago, Chile
 
 ## Quiero aprender
 
-Plataformas reactivas a estímulos externos. Cámara → audio → sonido.
+De todo; 
 
 ## Intereses
 
 - Dirección creativa
-- Moda y contracultura. Música y cine.
-- Inmersividad y experiencias sensoriales
+- Moda y Contracultura. Música y cine.
+- Inmersividad, experiencias sensoriales y efímeras
+- Luz y Sonido
 
-## Una pregunta que me interesa explorar
+## Por explorar
 
 ¿Cómo se deforma una geometría facial capturada por cámara cuando se le aplica ruido proporcional a la variación de un sonido ambiental, simulando la degradación del afecto al pasar de cuerpo a dato a imagen?
 
-## Algo que me inspira
+## Inspos
 
 [McQueen — Plato's Atlantis (2010)](https://www.youtube.com/watch?v=AoXtsHzalfg). El vestuario y la pasarela funcionan como piel reactiva, cuerpo y tecnología fusionados sin mediación explicativa.
-
-## Links
-
-- [Lozano-Hemmer — Pulse Room](https://www.lozano-hemmer.com/pulse_room.php)
-- [ml5.js — FaceMesh](https://learn.ml5js.org/#/reference/facemesh)
 
 ## Objeto
 
